@@ -5,8 +5,9 @@ const fuzzy = @import("fuzzy.zig");
 const tui = @import("tui.zig");
 const terminal = @import("terminal.zig");
 const import_history = @import("import.zig");
+const self_update = @import("self_update.zig");
 
-const VERSION = "0.1.0";
+const VERSION = self_update.VERSION;
 
 /// Auto-select thresholds
 const AUTO_SELECT_MIN_SCORE: i32 = 100;
@@ -31,6 +32,7 @@ const ParsedArgs = struct {
     query_mode: bool,
     query_prefix: ?[]const u8,
     import_source: ?import_history.ImportSource,
+    self_update: bool,
 };
 
 pub fn main() !void {
@@ -57,6 +59,13 @@ pub fn main() !void {
 
     if (args.import_source) |source| {
         try runImport(allocator, source);
+        return;
+    }
+
+    if (args.self_update) {
+        self_update.selfUpdate(allocator) catch {
+            std.process.exit(1);
+        };
         return;
     }
 
@@ -117,6 +126,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
         .query_mode = false,
         .query_prefix = null,
         .import_source = null,
+        .self_update = false,
     };
 
     while (args.next()) |arg| {
@@ -161,6 +171,8 @@ fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
         } else if (std.mem.eql(u8, arg, "--query") or std.mem.eql(u8, arg, "-q")) {
             result.query_mode = true;
             result.query_prefix = args.next(); // null = empty prefix (all entries)
+        } else if (std.mem.eql(u8, arg, "self-update")) {
+            result.self_update = true;
         } else if (arg[0] != '-') {
             result.query = arg;
         }
@@ -273,6 +285,7 @@ fn printHelp() !void {
         \\    init <SHELL>         Print shell integration script (bash, zsh, fish)
         \\    import <SOURCE>      Import history from shell history file
         \\                         Sources: --zsh-history, --bash-history
+        \\    self-update          Update zj to the latest version
         \\
         \\OPTIONS:
         \\    -h, --help           Show this help message
@@ -394,4 +407,5 @@ test {
     _ = @import("fuzzy.zig");
     _ = @import("tui.zig");
     _ = @import("import.zig");
+    _ = @import("self_update.zig");
 }

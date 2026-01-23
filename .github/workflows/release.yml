@@ -15,16 +15,20 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-linux
-            artifact: zj-linux-x86_64
+            artifact_os: linux
+            artifact_arch: amd64
           - os: ubuntu-latest
             target: aarch64-linux
-            artifact: zj-linux-aarch64
+            artifact_os: linux
+            artifact_arch: arm64
           - os: macos-latest
             target: x86_64-macos
-            artifact: zj-macos-x86_64
+            artifact_os: darwin
+            artifact_arch: amd64
           - os: macos-latest
             target: aarch64-macos
-            artifact: zj-macos-aarch64
+            artifact_os: darwin
+            artifact_arch: arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -36,6 +40,10 @@ jobs:
         with:
           version: 0.15.2
 
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
       - name: Build
         run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
 
@@ -44,14 +52,15 @@ jobs:
           mkdir -p dist
           cp zig-out/bin/zj dist/
           cd dist
-          tar -czvf ${{ matrix.artifact }}.tar.gz zj
-          mv ${{ matrix.artifact }}.tar.gz ../
+          ARTIFACT_NAME="zj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}.tar.gz"
+          tar -czvf "$ARTIFACT_NAME" zj
+          mv "$ARTIFACT_NAME" ../
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.tar.gz
+          name: zj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}
+          path: zj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}.tar.gz
 
   release:
     needs: build
@@ -64,8 +73,15 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum *.tar.gz > SHA256SUMS
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.tar.gz
+          files: |
+            artifacts/*.tar.gz
+            artifacts/SHA256SUMS
           generate_release_notes: true
