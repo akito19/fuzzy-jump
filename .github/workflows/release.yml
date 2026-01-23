@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-linux
+            artifact: zj-linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-linux
+            artifact: zj-linux-aarch64
+          - os: macos-latest
+            target: x86_64-macos
+            artifact: zj-macos-x86_64
+          - os: macos-latest
+            target: aarch64-macos
+            artifact: zj-macos-aarch64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp zig-out/bin/zj dist/
+          cd dist
+          tar -czvf ${{ matrix.artifact }}.tar.gz zj
+          mv ${{ matrix.artifact }}.tar.gz ../
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tar.gz
+          generate_release_notes: true

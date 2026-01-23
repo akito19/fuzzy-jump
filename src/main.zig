@@ -1,0 +1,334 @@
+const std = @import("std");
+const history = @import("history.zig");
+const scoring = @import("scoring.zig");
+const fuzzy = @import("fuzzy.zig");
+const tui = @import("tui.zig");
+const terminal = @import("terminal.zig");
+
+const VERSION = "0.1.0";
+
+/// Auto-select thresholds
+const AUTO_SELECT_MIN_SCORE: i32 = 100;
+const AUTO_SELECT_SCORE_MARGIN: i32 = 50;
+
+const ScoredEntryList = std.ArrayListUnmanaged(scoring.ScoredEntry);
+
+/// Shell type for init command
+const ShellType = enum {
+    bash,
+    zsh,
+    fish,
+};
+
+/// Parsed command line arguments
+const ParsedArgs = struct {
+    query: ?[]const u8,
+    debug_history: bool,
+    show_help: bool,
+    show_version: bool,
+    init_shell: ?ShellType,
+    query_mode: bool,
+    query_prefix: ?[]const u8,
+};
+
+pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const args = try parseArgs(allocator);
+
+    if (args.show_help) {
+        try printHelp();
+        return;
+    }
+
+    if (args.show_version) {
+        try printVersion();
+        return;
+    }
+
+    if (args.init_shell) |shell| {
+        try printInit(shell);
+        return;
+    }
+
+    var parsed_history = try history.parseHistory(allocator);
+    defer parsed_history.deinit();
+
+    if (args.query_mode) {
+        try runQueryMode(allocator, parsed_history.entries.items, args.query_prefix);
+        return;
+    }
+
+    if (args.debug_history) {
+        try debugHistory(parsed_history.entries.items);
+        return;
+    }
+
+    var scored_entries = try loadAndScoreEntries(allocator, parsed_history.entries.items, args.query);
+    defer scored_entries.deinit(allocator);
+
+    if (scored_entries.items.len == 0) {
+        std.debug.print("zj: no matching directories found\n", .{});
+        std.process.exit(1);
+    }
+
+    // Try auto-select for exact or single matches
+    if (args.query != null) {
+        if (tryAutoSelect(scored_entries.items)) |path| {
+            try outputPath(path);
+            return;
+        }
+    }
+
+    // Interactive selection
+    runInteractiveSelection(allocator, scored_entries.items);
+}
+
+/// Parse command line arguments
+fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    _ = args.next(); // Skip program name
+
+    var result = ParsedArgs{
+        .query = null,
+        .debug_history = false,
+        .show_help = false,
+        .show_version = false,
+        .init_shell = null,
+        .query_mode = false,
+        .query_prefix = null,
+    };
+
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            result.show_help = true;
+        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) {
+            result.show_version = true;
+        } else if (std.mem.eql(u8, arg, "--debug-history")) {
+            result.debug_history = true;
+        } else if (std.mem.eql(u8, arg, "init")) {
+            // Parse shell type for init subcommand
+            if (args.next()) |shell_arg| {
+                if (std.mem.eql(u8, shell_arg, "bash")) {
+                    result.init_shell = .bash;
+                } else if (std.mem.eql(u8, shell_arg, "zsh")) {
+                    result.init_shell = .zsh;
+                } else if (std.mem.eql(u8, shell_arg, "fish")) {
+                    result.init_shell = .fish;
+                } else {
+                    std.debug.print("zj: unknown shell '{s}'. Supported: bash, zsh, fish\n", .{shell_arg});
+                    std.process.exit(1);
+                }
+            } else {
+                std.debug.print("zj: 'init' requires a shell argument. Usage: zj init <bash|zsh|fish>\n", .{});
+                std.process.exit(1);
+            }
+        } else if (std.mem.eql(u8, arg, "--query") or std.mem.eql(u8, arg, "-q")) {
+            result.query_mode = true;
+            result.query_prefix = args.next(); // null = empty prefix (all entries)
+        } else if (arg[0] != '-') {
+            result.query = arg;
+        }
+    }
+
+    return result;
+}
+
+/// Load history and convert to scored entries
+fn loadAndScoreEntries(
+    allocator: std.mem.Allocator,
+    entries: []const history.HistoryEntry,
+    query: ?[]const u8,
+) !ScoredEntryList {
+    const now = scoring.getCurrentTimestamp();
+    var scored_entries: ScoredEntryList = .empty;
+    errdefer scored_entries.deinit(allocator);
+
+    for (entries) |entry| {
+        const frecency = scoring.calculateFrecencyScore(entry.visit_count, entry.timestamp, now);
+
+        var fuzzy_score: i32 = 0;
+        if (query) |q| {
+            if (fuzzy.fuzzyMatch(q, entry.path)) |score| {
+                fuzzy_score = score;
+            } else {
+                continue;
+            }
+        }
+
+        try scored_entries.append(allocator, .{
+            .path = entry.path,
+            .frecency_score = frecency,
+            .fuzzy_score = fuzzy_score,
+            .total_score = scoring.calculateTotalScore(frecency, fuzzy_score),
+            .visit_count = entry.visit_count,
+            .last_visit = entry.timestamp,
+        });
+    }
+
+    std.mem.sort(scoring.ScoredEntry, scored_entries.items, {}, scoring.compareScores);
+    return scored_entries;
+}
+
+/// Try to auto-select if there's a single match or a significantly better top match
+fn tryAutoSelect(entries: []const scoring.ScoredEntry) ?[]const u8 {
+    if (entries.len == 1) {
+        return entries[0].path;
+    }
+
+    if (entries.len > 1) {
+        const top = entries[0];
+        const second = entries[1];
+
+        if (top.fuzzy_score >= AUTO_SELECT_MIN_SCORE and
+            top.fuzzy_score > second.fuzzy_score + AUTO_SELECT_SCORE_MARGIN)
+        {
+            return top.path;
+        }
+    }
+
+    return null;
+}
+
+/// Run interactive TUI selection
+fn runInteractiveSelection(allocator: std.mem.Allocator, entries: []scoring.ScoredEntry) void {
+    const maybe_selected = tui.selectDirectory(allocator, entries) catch {
+        std.debug.print("zj: selection error\n", .{});
+        std.process.exit(1);
+    };
+
+    if (maybe_selected) |selected| {
+        outputPath(selected) catch {
+            std.process.exit(1);
+        };
+    } else {
+        std.debug.print("zj: selection cancelled\n", .{});
+        std.process.exit(1);
+    }
+}
+
+/// Output selected path to stdout
+fn outputPath(path: []const u8) !void {
+    const stdout = std.fs.File.stdout();
+
+    // Validate path has no dangerous characters
+    for (path) |c| {
+        if (c == 0 or c == '\n' or c == '\r') {
+            std.debug.print("zj: invalid path\n", .{});
+            std.process.exit(1);
+        }
+    }
+
+    _ = try stdout.write(path);
+    _ = try stdout.write("\n");
+}
+
+fn printHelp() !void {
+    const help =
+        \\zj - Fuzzy directory jump
+        \\
+        \\USAGE:
+        \\    zj [OPTIONS] [QUERY]
+        \\    zj init <SHELL>
+        \\
+        \\ARGUMENTS:
+        \\    [QUERY]    Fuzzy search pattern for directory name
+        \\
+        \\COMMANDS:
+        \\    init <SHELL>         Print shell integration script (bash, zsh, fish)
+        \\
+        \\OPTIONS:
+        \\    -h, --help           Show this help message
+        \\    -v, --version        Show version
+        \\    -q, --query [PREFIX] List completions matching PREFIX (for shell integration)
+        \\    --debug-history      Show parsed history entries
+        \\
+        \\INTERACTIVE KEYS:
+        \\    Up/Down, Ctrl-P/N    Navigate entries
+        \\    Enter                Select directory
+        \\    Esc, Ctrl-C          Cancel
+        \\    Backspace            Delete character
+        \\    Ctrl-U               Clear input
+        \\    Ctrl-W               Delete word
+        \\
+        \\SHELL INTEGRATION:
+        \\    Zsh (~/.zshrc):
+        \\        eval "$(zj init zsh)"
+        \\
+        \\    Bash (~/.bashrc):
+        \\        eval "$(zj init bash)"
+        \\
+        \\    Fish (~/.config/fish/config.fish):
+        \\        zj init fish | source
+        \\
+        \\    To enable cd override (fallback to zj when cd fails):
+        \\        export ZJ_CD_OVERRIDE=1  # or: set -gx ZJ_CD_OVERRIDE 1 (fish)
+        \\
+    ;
+    std.debug.print("{s}\n", .{help});
+}
+
+fn printVersion() !void {
+    std.debug.print("zj version {s}\n", .{VERSION});
+}
+
+fn printInit(shell: ShellType) !void {
+    const stdout = std.fs.File.stdout();
+    const script = switch (shell) {
+        .bash => @embedFile("shell/zj.bash"),
+        .zsh => @embedFile("shell/zj.zsh"),
+        .fish => @embedFile("shell/zj.fish"),
+    };
+    _ = try stdout.write(script);
+}
+
+fn debugHistory(entries: []const history.HistoryEntry) !void {
+    std.debug.print("Parsed {d} history entries:\n\n", .{entries.len});
+
+    for (entries[0..@min(entries.len, 50)]) |entry| {
+        std.debug.print("  {s}\n", .{entry.path});
+        std.debug.print("    visits: {d}, timestamp: {d}\n\n", .{ entry.visit_count, entry.timestamp });
+    }
+
+    if (entries.len > 50) {
+        std.debug.print("  ... and {d} more\n", .{entries.len - 50});
+    }
+}
+
+/// Run interactive query mode with inline TUI (for shell completion widget)
+fn runQueryMode(
+    allocator: std.mem.Allocator,
+    entries: []const history.HistoryEntry,
+    initial_query: ?[]const u8,
+) !void {
+    // Load all entries with frecency scores
+    var scored_entries = try loadAndScoreEntries(allocator, entries, null);
+    defer scored_entries.deinit(allocator);
+
+    if (scored_entries.items.len == 0) {
+        std.process.exit(1);
+    }
+
+    // Run inline TUI with initial query
+    const maybe_selected = tui.selectDirectoryInline(allocator, scored_entries.items, initial_query) catch {
+        std.process.exit(1);
+    };
+
+    if (maybe_selected) |selected| {
+        try outputPath(selected);
+    } else {
+        std.process.exit(1);
+    }
+}
+
+test {
+    _ = @import("terminal.zig");
+    _ = @import("history.zig");
+    _ = @import("scoring.zig");
+    _ = @import("fuzzy.zig");
+    _ = @import("tui.zig");
+}
