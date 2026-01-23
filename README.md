@@ -113,6 +113,13 @@ zj self-update
 | `-v`, `--version` | Show version |
 | `--debug-history` | Show parsed history entries |
 
+### Import Sources
+
+| Source | Description |
+|--------|-------------|
+| `--zsh-history` | Import from `~/.zsh_history` (or `$HISTFILE`) |
+| `--bash-history` | Import from `~/.bash_history` (or `$HISTFILE`) |
+
 ### Examples
 
 ```bash
