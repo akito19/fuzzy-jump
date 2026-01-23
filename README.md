@@ -89,6 +89,8 @@ With this enabled:
 ```
 zj [OPTIONS] [QUERY]
 zj init <SHELL>
+zj import <SOURCE>
+zj self-update
 ```
 
 ### Arguments
@@ -100,6 +102,8 @@ zj init <SHELL>
 | Command | Description |
 |---------|-------------|
 | `init <SHELL>` | Print shell integration script (`bash`, `zsh`, or `fish`) |
+| `import <SOURCE>` | Import history from shell history file (`--zsh-history`, `--bash-history`) |
+| `self-update` | Update zj to the latest version |
 
 ### Options
 
@@ -120,6 +124,12 @@ zj proj
 
 # Jump to a directory starting with "work"
 zj work
+
+# Import directories from zsh history (bootstrap)
+zj import --zsh-history
+
+# Update to the latest version
+zj self-update
 ```
 
 ## Interactive Keys
