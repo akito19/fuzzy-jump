@@ -4,6 +4,7 @@ const scoring = @import("scoring.zig");
 const fuzzy = @import("fuzzy.zig");
 const tui = @import("tui.zig");
 const terminal = @import("terminal.zig");
+const import_history = @import("import.zig");
 
 const VERSION = "0.1.0";
 
@@ -29,6 +30,7 @@ const ParsedArgs = struct {
     init_shell: ?ShellType,
     query_mode: bool,
     query_prefix: ?[]const u8,
+    import_source: ?import_history.ImportSource,
 };
 
 pub fn main() !void {
@@ -53,6 +55,11 @@ pub fn main() !void {
         return;
     }
 
+    if (args.import_source) |source| {
+        try runImport(allocator, source);
+        return;
+    }
+
     var parsed_history = try history.parseHistory(allocator);
     defer parsed_history.deinit();
 
@@ -70,7 +77,15 @@ pub fn main() !void {
     defer scored_entries.deinit(allocator);
 
     if (scored_entries.items.len == 0) {
-        std.debug.print("zj: no matching directories found\n", .{});
+        if (parsed_history.entries.items.len == 0) {
+            // No history at all
+            std.debug.print("zj: No history yet.\n", .{});
+            std.debug.print("    Start using cd to build history, or run:\n", .{});
+            std.debug.print("    zj import --zsh-history\n", .{});
+        } else {
+            // History exists but no matches for query
+            std.debug.print("zj: no matching directories found\n", .{});
+        }
         std.process.exit(1);
     }
 
@@ -101,6 +116,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
         .init_shell = null,
         .query_mode = false,
         .query_prefix = null,
+        .import_source = null,
     };
 
     while (args.next()) |arg| {
@@ -125,6 +141,21 @@ fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
                 }
             } else {
                 std.debug.print("zj: 'init' requires a shell argument. Usage: zj init <bash|zsh|fish>\n", .{});
+                std.process.exit(1);
+            }
+        } else if (std.mem.eql(u8, arg, "import")) {
+            // Parse import source
+            if (args.next()) |source_arg| {
+                if (std.mem.eql(u8, source_arg, "--zsh-history")) {
+                    result.import_source = .zsh_history;
+                } else if (std.mem.eql(u8, source_arg, "--bash-history")) {
+                    result.import_source = .bash_history;
+                } else {
+                    std.debug.print("zj: unknown import source '{s}'. Supported: --zsh-history, --bash-history\n", .{source_arg});
+                    std.process.exit(1);
+                }
+            } else {
+                std.debug.print("zj: 'import' requires a source argument. Usage: zj import <--zsh-history|--bash-history>\n", .{});
                 std.process.exit(1);
             }
         } else if (std.mem.eql(u8, arg, "--query") or std.mem.eql(u8, arg, "-q")) {
@@ -240,6 +271,8 @@ fn printHelp() !void {
         \\
         \\COMMANDS:
         \\    init <SHELL>         Print shell integration script (bash, zsh, fish)
+        \\    import <SOURCE>      Import history from shell history file
+        \\                         Sources: --zsh-history, --bash-history
         \\
         \\OPTIONS:
         \\    -h, --help           Show this help message
@@ -284,6 +317,35 @@ fn printInit(shell: ShellType) !void {
         .fish => @embedFile("shell/zj.fish"),
     };
     _ = try stdout.write(script);
+}
+
+fn runImport(allocator: std.mem.Allocator, source: import_history.ImportSource) !void {
+    const data_file_path = try history.getDataFilePath(allocator);
+    defer allocator.free(data_file_path);
+
+    const source_name = switch (source) {
+        .zsh_history => "zsh history",
+        .bash_history => "bash history",
+    };
+
+    std.debug.print("Importing from {s}...\n", .{source_name});
+
+    const result = import_history.importFromShellHistory(allocator, source, data_file_path) catch |err| {
+        if (err == error.FileNotFound) {
+            std.process.exit(1);
+        }
+        std.debug.print("zj: import failed: {}\n", .{err});
+        std.process.exit(1);
+    };
+
+    std.debug.print("Done! Imported {d} directories", .{result.imported_count});
+    if (result.skipped_count > 0) {
+        std.debug.print(" (skipped {d} relative/invalid paths)", .{result.skipped_count});
+    }
+    if (result.already_exists_count > 0) {
+        std.debug.print(" ({d} already in history)", .{result.already_exists_count});
+    }
+    std.debug.print(".\n", .{});
 }
 
 fn debugHistory(entries: []const history.HistoryEntry) !void {
@@ -331,4 +393,5 @@ test {
     _ = @import("scoring.zig");
     _ = @import("fuzzy.zig");
     _ = @import("tui.zig");
+    _ = @import("import.zig");
 }

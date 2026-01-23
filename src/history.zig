@@ -65,7 +65,7 @@ pub const ParsedHistory = struct {
 };
 
 /// Get the data file path from environment or default
-fn getDataFilePath(allocator: Allocator) ![]const u8 {
+pub fn getDataFilePath(allocator: Allocator) ![]const u8 {
     // Check ZJ_DATA_FILE environment variable first
     if (std.posix.getenv("ZJ_DATA_FILE")) |path| {
         return try allocator.dupe(u8, path);
