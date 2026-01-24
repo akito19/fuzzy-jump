@@ -69,6 +69,12 @@ pub fn main() !void {
         return;
     }
 
+    // Check if stdin is a pipe (not a TTY)
+    if (!terminal.isStdinTty()) {
+        runPipeMode(allocator, args.query);
+        return;
+    }
+
     var parsed_history = try history.parseHistory(allocator);
     defer parsed_history.deinit();
 
@@ -254,6 +260,109 @@ fn runInteractiveSelection(allocator: std.mem.Allocator, entries: []scoring.Scor
     }
 }
 
+const MAX_PIPE_SIZE = 10 * 1024 * 1024; // 10 MB max for pipe input
+
+/// Run pipe mode: read lines from stdin, select with TUI using /dev/tty
+fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
+    // Read all content from stdin
+    const stdin = std.fs.File.stdin();
+    const content = stdin.readToEndAlloc(allocator, MAX_PIPE_SIZE) catch {
+        std.debug.print("zj: failed to read from stdin\n", .{});
+        std.process.exit(1);
+    };
+    defer allocator.free(content);
+
+    if (content.len == 0) {
+        std.debug.print("zj: no input received from pipe\n", .{});
+        std.process.exit(1);
+    }
+
+    // Split content into lines
+    var lines = std.ArrayListUnmanaged([]const u8){};
+    defer lines.deinit(allocator);
+
+    var line_iter = std.mem.splitScalar(u8, content, '\n');
+    while (line_iter.next()) |line| {
+        // Skip empty lines
+        if (line.len == 0) continue;
+        lines.append(allocator, line) catch {
+            std.debug.print("zj: memory allocation failed\n", .{});
+            std.process.exit(1);
+        };
+    }
+
+    if (lines.items.len == 0) {
+        std.debug.print("zj: no input received from pipe\n", .{});
+        std.process.exit(1);
+    }
+
+    // Convert lines to ScoredEntry (with frecency_score = 0)
+    var scored_entries = std.ArrayListUnmanaged(scoring.ScoredEntry){};
+    defer scored_entries.deinit(allocator);
+
+    for (lines.items) |line| {
+        var fuzzy_score: i32 = 0;
+        if (query) |q| {
+            if (fuzzy.fuzzyMatch(q, line)) |score| {
+                fuzzy_score = score;
+            } else {
+                continue; // Skip non-matching lines
+            }
+        }
+
+        scored_entries.append(allocator, .{
+            .path = line,
+            .frecency_score = 0,
+            .fuzzy_score = fuzzy_score,
+            .total_score = scoring.calculateTotalScore(0, fuzzy_score),
+            .visit_count = 0,
+            .last_visit = 0,
+        }) catch {
+            std.debug.print("zj: memory allocation failed\n", .{});
+            std.process.exit(1);
+        };
+    }
+
+    if (scored_entries.items.len == 0) {
+        std.debug.print("zj: no matching entries found\n", .{});
+        std.process.exit(1);
+    }
+
+    // Sort by score and try auto-select if query was provided
+    if (query != null) {
+        std.mem.sort(scoring.ScoredEntry, scored_entries.items, {}, scoring.compareScores);
+
+        // Try auto-select for single match or significantly better top match
+        if (tryAutoSelect(scored_entries.items)) |path| {
+            outputPath(path) catch {
+                std.process.exit(1);
+            };
+            return;
+        }
+    }
+
+    // Open /dev/tty for keyboard input (only needed for interactive selection)
+    const tty_fd = terminal.openTty() catch {
+        std.debug.print("zj: failed to open /dev/tty (not running in a terminal?)\n", .{});
+        std.process.exit(1);
+    };
+
+    // Run TUI with /dev/tty for input
+    const maybe_selected = tui.selectDirectoryWithTty(allocator, scored_entries.items, null, tty_fd) catch {
+        std.debug.print("zj: selection error\n", .{});
+        std.process.exit(1);
+    };
+
+    if (maybe_selected) |selected| {
+        outputPath(selected) catch {
+            std.process.exit(1);
+        };
+    } else {
+        std.debug.print("zj: selection cancelled\n", .{});
+        std.process.exit(1);
+    }
+}
+
 /// Output selected path to stdout
 fn outputPath(path: []const u8) !void {
     const stdout = std.fs.File.stdout();
@@ -277,6 +386,7 @@ fn printHelp() !void {
         \\USAGE:
         \\    zj [OPTIONS] [QUERY]
         \\    zj init <SHELL>
+        \\    <command> | zj [QUERY]
         \\
         \\ARGUMENTS:
         \\    [QUERY]    Fuzzy search pattern for directory name
@@ -292,6 +402,12 @@ fn printHelp() !void {
         \\    -v, --version        Show version
         \\    -q, --query [PREFIX] List completions matching PREFIX (for shell integration)
         \\    --debug-history      Show parsed history entries
+        \\
+        \\PIPE INPUT:
+        \\    zj can read paths from stdin when piped:
+        \\        ghq list -p | zj          # Select from ghq-managed repositories
+        \\        fd -t d | zj              # Select from fd results
+        \\        ghq list -p | zj proj     # Filter with query
         \\
         \\INTERACTIVE KEYS:
         \\    Up/Down, Ctrl-P/N    Navigate entries

@@ -1,4 +1,5 @@
 const std = @import("std");
+const posix = std.posix;
 const terminal = @import("terminal.zig");
 const scoring = @import("scoring.zig");
 const fuzzy = @import("fuzzy.zig");
@@ -27,8 +28,14 @@ pub const TUI = struct {
     visible_lines: usize,
     inline_mode: bool,
     rendered_lines: usize,
+    input_fd: posix.fd_t,
+    owns_input_fd: bool,
 
     pub fn init(allocator: Allocator, entries: []scoring.ScoredEntry) TUI {
+        return initWithFd(allocator, entries, posix.STDIN_FILENO, false);
+    }
+
+    pub fn initWithFd(allocator: Allocator, entries: []scoring.ScoredEntry, fd: posix.fd_t, owns_fd: bool) TUI {
         return .{
             .allocator = allocator,
             .all_entries = entries,
@@ -41,6 +48,8 @@ pub const TUI = struct {
             .visible_lines = DEFAULT_VISIBLE_LINES,
             .inline_mode = false,
             .rendered_lines = 0,
+            .input_fd = fd,
+            .owns_input_fd = owns_fd,
         };
     }
 
@@ -57,6 +66,8 @@ pub const TUI = struct {
             .visible_lines = INLINE_VISIBLE_LINES,
             .inline_mode = true,
             .rendered_lines = 0,
+            .input_fd = posix.STDIN_FILENO,
+            .owns_input_fd = false,
         };
     }
 
@@ -74,12 +85,15 @@ pub const TUI = struct {
             self.cleanup();
             terminal.disableRawMode(state);
         }
+        if (self.owns_input_fd) {
+            terminal.closeTty(self.input_fd);
+        }
     }
 
     /// Run the interactive TUI
     pub fn run(self: *TUI) !?[]const u8 {
-        // Enter raw mode
-        self.terminal_state = try terminal.enableRawMode();
+        // Enter raw mode on the input fd
+        self.terminal_state = try terminal.enableRawModeOnFd(self.input_fd);
 
         // Initial filter with empty query
         try self.filterEntries();
@@ -87,7 +101,7 @@ pub const TUI = struct {
 
         // Main event loop
         while (true) {
-            const key = try terminal.readKey();
+            const key = try terminal.readKeyFromFd(self.input_fd);
 
             switch (key) {
                 .escape, .ctrl_c => {
@@ -402,11 +416,19 @@ pub fn selectDirectory(allocator: Allocator, entries: []scoring.ScoredEntry) !?[
 
 /// Run interactive selection with initial query and return selected path
 pub fn selectDirectoryWithQuery(allocator: Allocator, entries: []scoring.ScoredEntry, initial_query: ?[]const u8) !?[]const u8 {
+    return selectDirectoryWithTty(allocator, entries, initial_query, null);
+}
+
+/// Run interactive selection with initial query and TTY fd
+pub fn selectDirectoryWithTty(allocator: Allocator, entries: []scoring.ScoredEntry, initial_query: ?[]const u8, tty_fd: ?posix.fd_t) !?[]const u8 {
     if (entries.len == 0) {
         return null;
     }
 
-    var ui = TUI.init(allocator, entries);
+    var ui = if (tty_fd) |fd|
+        TUI.initWithFd(allocator, entries, fd, true)
+    else
+        TUI.init(allocator, entries);
     defer ui.deinit();
 
     if (initial_query) |query| {
