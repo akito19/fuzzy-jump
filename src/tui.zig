@@ -295,11 +295,12 @@ pub const TUI = struct {
         const stderr = std.fs.File.stderr();
         self.output_buf.clearRetainingCapacity();
 
-        // On first render, save cursor position; on subsequent renders, restore to saved position
-        if (self.rendered_lines == 0) {
-            try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_save);
-        } else {
-            try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_restore);
+        // On subsequent renders, move cursor up by the number of previously rendered lines
+        if (self.rendered_lines > 0) {
+            var cursor_up_buf: [16]u8 = undefined;
+            const cursor_up_seq = terminal.Ansi.cursorUp(&cursor_up_buf, self.rendered_lines);
+            try self.output_buf.appendSlice(self.allocator, cursor_up_seq);
+            try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_column_1);
         }
 
         // Hide cursor and clear from cursor to end of screen
@@ -356,7 +357,7 @@ pub const TUI = struct {
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.dim);
 
         var count_buf: [64]u8 = undefined;
-        const count_str = std.fmt.bufPrint(&count_buf, "  {d} matches", .{self.filtered_entries.items.len}) catch "  ? matches";
+        const count_str = std.fmt.bufPrint(&count_buf, "  {d} matches\n", .{self.filtered_entries.items.len}) catch "  ? matches\n";
         try self.output_buf.appendSlice(self.allocator, count_str);
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.reset_style);
         lines_rendered += 1;
@@ -375,8 +376,13 @@ pub const TUI = struct {
         const stderr = std.fs.File.stderr();
 
         if (self.inline_mode) {
-            // Restore saved cursor position and clear to end of screen
-            _ = stderr.write(terminal.Ansi.cursor_restore) catch {};
+            // Move cursor up by the number of rendered lines and clear to end of screen
+            if (self.rendered_lines > 0) {
+                var cursor_up_buf: [16]u8 = undefined;
+                const cursor_up_seq = terminal.Ansi.cursorUp(&cursor_up_buf, self.rendered_lines);
+                _ = stderr.write(cursor_up_seq) catch {};
+                _ = stderr.write(terminal.Ansi.cursor_column_1) catch {};
+            }
             _ = stderr.write(terminal.Ansi.clear_to_end) catch {};
             _ = stderr.write(terminal.Ansi.cursor_show) catch {};
             _ = stderr.write(terminal.Ansi.reset_style) catch {};

@@ -58,10 +58,18 @@ pub const Ansi = struct {
     pub const cursor_show = "\x1b[?25h";
     pub const cursor_save = "\x1b7";
     pub const cursor_restore = "\x1b8";
+    pub const cursor_column_1 = "\x1b[1G"; // Move cursor to column 1
     pub const reset_style = "\x1b[0m";
     pub const reverse_video = "\x1b[7m";
     pub const bold = "\x1b[1m";
     pub const dim = "\x1b[2m";
+
+    /// Generate cursor up sequence for n lines
+    pub fn cursorUp(buf: []u8, n: usize) []const u8 {
+        if (n == 0) return "";
+        const len = std.fmt.bufPrint(buf, "\x1b[{d}A", .{n}) catch return "";
+        return buf[0..len.len];
+    }
 };
 
 /// Read a single byte from stdin
