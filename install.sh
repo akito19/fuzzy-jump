@@ -19,7 +19,7 @@ detect_platform() {
 
     case "$OS" in
         Linux)  OS="linux" ;;
-        Darwin) OS="macos" ;;
+        Darwin) OS="darwin" ;;
         *)
             echo "Error: Unsupported OS: $OS" >&2
             exit 1
@@ -27,8 +27,8 @@ detect_platform() {
     esac
 
     case "$ARCH" in
-        x86_64|amd64)  ARCH="x86_64" ;;
-        aarch64|arm64) ARCH="aarch64" ;;
+        x86_64|amd64)  ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
         *)
             echo "Error: Unsupported architecture: $ARCH" >&2
             exit 1
@@ -61,7 +61,7 @@ download_binary() {
         exit 1
     fi
 
-    ARCHIVE_NAME="${BINARY_NAME}-${PLATFORM}.tar.gz"
+    ARCHIVE_NAME="${BINARY_NAME}-${VERSION#v}-${PLATFORM}.tar.gz"
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
 
     echo "Downloading $BINARY_NAME $VERSION..."
