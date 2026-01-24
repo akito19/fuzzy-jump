@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const http = std.http;
 
-pub const VERSION = "0.2.1";
+pub const VERSION = "0.3.0";
 
 const GITHUB_REPO = "akito19/z-jump";
 
