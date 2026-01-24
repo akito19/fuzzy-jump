@@ -16,7 +16,7 @@ const InputBuffer = std.ArrayListUnmanaged(u8);
 const OutputBuffer = std.ArrayListUnmanaged(u8);
 
 /// TUI state
-pub const TUI = struct {
+const TUI = struct {
     allocator: Allocator,
     all_entries: []scoring.ScoredEntry,
     filtered_entries: EntryList,
@@ -232,33 +232,27 @@ pub const TUI = struct {
         }
     }
 
-    /// Render fullscreen TUI
-    fn renderFullscreen(self: *TUI) !void {
-        self.output_buf.clearRetainingCapacity();
-
-        // Hide cursor and move to top
-        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_hide);
-        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_home);
-        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.clear_screen);
-
-        // Render input line
+    /// Render the input line with prompt
+    fn renderInputLine(self: *TUI) !void {
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.bold);
         try self.output_buf.appendSlice(self.allocator, "> ");
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.reset_style);
         try self.output_buf.appendSlice(self.allocator, self.input.items);
         try self.output_buf.appendSlice(self.allocator, "_\n");
+    }
 
-        // Separator
+    /// Render the separator line
+    fn renderSeparator(self: *TUI) !void {
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.dim);
         try self.output_buf.appendSlice(self.allocator, SEPARATOR_LINE);
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.reset_style);
+    }
 
-        // Render entries
-        const max_visible = @min(self.visible_lines - 2, self.filtered_entries.items.len);
-        const end_idx = @min(self.scroll_offset + max_visible, self.filtered_entries.items.len);
-
-        for (self.filtered_entries.items[self.scroll_offset..end_idx], 0..) |entry, i| {
-            const global_idx = self.scroll_offset + i;
+    /// Render visible entries, returns number of entries rendered
+    fn renderEntries(self: *TUI, start_idx: usize, end_idx: usize) !usize {
+        var count: usize = 0;
+        for (self.filtered_entries.items[start_idx..end_idx], 0..) |entry, i| {
+            const global_idx = start_idx + i;
             const is_selected = global_idx == self.selected_index;
 
             // Sanitize path for display
@@ -280,7 +274,27 @@ pub const TUI = struct {
             }
 
             try self.output_buf.appendSlice(self.allocator, "\n");
+            count += 1;
         }
+        return count;
+    }
+
+    /// Render fullscreen TUI
+    fn renderFullscreen(self: *TUI) !void {
+        self.output_buf.clearRetainingCapacity();
+
+        // Hide cursor and move to top
+        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_hide);
+        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_home);
+        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.clear_screen);
+
+        try self.renderInputLine();
+        try self.renderSeparator();
+
+        // Render entries
+        const max_visible = @min(self.visible_lines - 2, self.filtered_entries.items.len);
+        const end_idx = @min(self.scroll_offset + max_visible, self.filtered_entries.items.len);
+        _ = try self.renderEntries(self.scroll_offset, end_idx);
 
         // Show count
         try self.output_buf.appendSlice(self.allocator, "\n");
@@ -323,49 +337,16 @@ pub const TUI = struct {
 
         var lines_rendered: usize = 0;
 
-        // Render input line
-        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.bold);
-        try self.output_buf.appendSlice(self.allocator, "> ");
-        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.reset_style);
-        try self.output_buf.appendSlice(self.allocator, self.input.items);
-        try self.output_buf.appendSlice(self.allocator, "_\n");
+        try self.renderInputLine();
         lines_rendered += 1;
 
-        // Separator
-        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.dim);
-        try self.output_buf.appendSlice(self.allocator, SEPARATOR_LINE);
-        try self.output_buf.appendSlice(self.allocator, terminal.Ansi.reset_style);
+        try self.renderSeparator();
         lines_rendered += 1;
 
         // Render entries
         const max_visible = @min(self.visible_lines - 3, self.filtered_entries.items.len);
         const end_idx = @min(self.scroll_offset + max_visible, self.filtered_entries.items.len);
-
-        for (self.filtered_entries.items[self.scroll_offset..end_idx], 0..) |entry, i| {
-            const global_idx = self.scroll_offset + i;
-            const is_selected = global_idx == self.selected_index;
-
-            // Sanitize path for display
-            const safe_path = try terminal.sanitizeForDisplay(self.allocator, entry.path);
-            defer self.allocator.free(safe_path);
-
-            if (is_selected) {
-                try self.output_buf.appendSlice(self.allocator, terminal.Ansi.reverse_video);
-                try self.output_buf.appendSlice(self.allocator, terminal.Ansi.bold);
-                try self.output_buf.appendSlice(self.allocator, "> ");
-            } else {
-                try self.output_buf.appendSlice(self.allocator, "  ");
-            }
-
-            try self.output_buf.appendSlice(self.allocator, safe_path);
-
-            if (is_selected) {
-                try self.output_buf.appendSlice(self.allocator, terminal.Ansi.reset_style);
-            }
-
-            try self.output_buf.appendSlice(self.allocator, "\n");
-            lines_rendered += 1;
-        }
+        lines_rendered += try self.renderEntries(self.scroll_offset, end_idx);
 
         // Show count
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.dim);
@@ -415,7 +396,7 @@ pub fn selectDirectory(allocator: Allocator, entries: []scoring.ScoredEntry) !?[
 }
 
 /// Run interactive selection with initial query and return selected path
-pub fn selectDirectoryWithQuery(allocator: Allocator, entries: []scoring.ScoredEntry, initial_query: ?[]const u8) !?[]const u8 {
+fn selectDirectoryWithQuery(allocator: Allocator, entries: []scoring.ScoredEntry, initial_query: ?[]const u8) !?[]const u8 {
     return selectDirectoryWithTty(allocator, entries, initial_query, null);
 }
 

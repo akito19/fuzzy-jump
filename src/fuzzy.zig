@@ -102,7 +102,7 @@ fn fuzzyMatchCore(pattern: []const u8, text: []const u8) ?i32 {
 }
 
 /// Get basename (last path component) from a path
-pub fn getBasename(path: []const u8) []const u8 {
+fn getBasename(path: []const u8) []const u8 {
     if (path.len == 0) return path;
 
     // Find last slash

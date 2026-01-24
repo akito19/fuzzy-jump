@@ -2,6 +2,7 @@ const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
+const util = @import("util.zig");
 
 pub const HistoryEntry = struct {
     path: []const u8,
@@ -22,7 +23,7 @@ const PathMap = std.StringHashMapUnmanaged(VisitData);
 const InternMap = std.StringHashMapUnmanaged([]const u8);
 
 /// String pool for deduplicating paths
-pub const StringPool = struct {
+const StringPool = struct {
     strings: InternMap,
     allocator: Allocator,
 
@@ -53,7 +54,7 @@ pub const StringPool = struct {
 };
 
 /// Parsed history result
-pub const ParsedHistory = struct {
+const ParsedHistory = struct {
     entries: EntryList,
     string_pool: StringPool,
     allocator: Allocator,
@@ -123,7 +124,7 @@ pub fn parseHistory(allocator: Allocator) !ParsedHistory {
         const data = entry.value_ptr.*;
 
         // Verify directory still exists
-        if (directoryExists(path)) {
+        if (util.directoryExists(path)) {
             const interned_path = try string_pool.intern(path);
             try entries.append(allocator, .{
                 .path = interned_path,
@@ -234,12 +235,7 @@ fn pruneAndWriteBack(
 
 /// Write entries back to the data file (compacted format)
 fn writeDataFile(allocator: Allocator, entries: []const HistoryEntry, path: []const u8) !void {
-    // Ensure parent directory exists
-    if (std.fs.path.dirname(path)) |dir| {
-        std.fs.makeDirAbsolute(dir) catch |err| {
-            if (err != error.PathAlreadyExists) return err;
-        };
-    }
+    try util.ensureParentDirExists(path);
 
     const file = try fs.createFileAbsolute(path, .{});
     defer file.close();
@@ -249,13 +245,6 @@ fn writeDataFile(allocator: Allocator, entries: []const HistoryEntry, path: []co
         defer allocator.free(line);
         _ = try file.write(line);
     }
-}
-
-/// Check if a directory exists
-fn directoryExists(path: []const u8) bool {
-    var dir = fs.openDirAbsolute(path, .{}) catch return false;
-    dir.close();
-    return true;
 }
 
 test "getDataFilePath with ZJ_DATA_FILE" {
