@@ -2,6 +2,7 @@ const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
+const util = @import("util.zig");
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB max for shell history
 
@@ -129,7 +130,7 @@ pub fn importFromShellHistory(
         }
 
         // Verify directory exists
-        if (!directoryExists(normalized)) {
+        if (!util.directoryExists(normalized)) {
             result.skipped_count += 1;
             continue;
         }
@@ -331,25 +332,13 @@ fn normalizePath(allocator: Allocator, path: []const u8) ![]const u8 {
     return try result.toOwnedSlice(allocator);
 }
 
-/// Check if a directory exists
-fn directoryExists(path: []const u8) bool {
-    var dir = fs.openDirAbsolute(path, .{}) catch return false;
-    dir.close();
-    return true;
-}
-
 /// Append paths to data file
 fn appendToDataFile(
     allocator: Allocator,
     paths: std.StringHashMap(void),
     data_file_path: []const u8,
 ) !void {
-    // Ensure parent directory exists
-    if (std.fs.path.dirname(data_file_path)) |dir| {
-        std.fs.makeDirAbsolute(dir) catch |err| {
-            if (err != error.PathAlreadyExists) return err;
-        };
-    }
+    try util.ensureParentDirExists(data_file_path);
 
     const file = try fs.createFileAbsolute(data_file_path, .{ .truncate = false });
     defer file.close();

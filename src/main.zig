@@ -524,4 +524,5 @@ test {
     _ = @import("tui.zig");
     _ = @import("import.zig");
     _ = @import("self_update.zig");
+    _ = @import("util.zig");
 }
