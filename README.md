@@ -8,6 +8,7 @@ A fuzzy directory jump tool that extends `cd`. It extracts directory navigation 
 - Frecency scoring (prioritizes frequently used and recently accessed directories)
 - Fuzzy matching with basename-priority scoring
 - Interactive TUI with real-time filtering
+- Pipe input support (use with `ghq`, `fd`, etc.)
 - UTF-8 support (works with non-ASCII directory names)
 
 ## Installation
@@ -91,6 +92,7 @@ zj [OPTIONS] [QUERY]
 zj init <SHELL>
 zj import <SOURCE>
 zj self-update
+<command> | zj [QUERY]
 ```
 
 ### Arguments
@@ -120,6 +122,21 @@ zj self-update
 | `--zsh-history` | Import from `~/.zsh_history` (or `$HISTFILE`) |
 | `--bash-history` | Import from `~/.bash_history` (or `$HISTFILE`) |
 
+### Pipe Input
+
+`zj` can read paths from stdin, allowing integration with tools like `ghq`, `fd`, `find`, etc.
+
+```bash
+# Select from ghq-managed repositories
+ghq list -p | zj
+
+# Select from fd results
+fd -t d | zj
+
+# Filter piped input with a query
+ghq list -p | zj proj
+```
+
 ### Examples
 
 ```bash
@@ -137,6 +154,9 @@ zj import --zsh-history
 
 # Update to the latest version
 zj self-update
+
+# Select from ghq repositories and cd into it
+cd "$(ghq list -p | zj)"
 ```
 
 ## Interactive Keys

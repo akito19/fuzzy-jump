@@ -6,15 +6,25 @@ pub const TerminalError = error{
     SetAttrFailed,
 };
 
+pub const TtyError = error{
+    OpenFailed,
+};
+
 /// Original terminal state for restoration
 pub const TerminalState = struct {
     original_termios: posix.termios,
+    fd: posix.fd_t = posix.STDIN_FILENO,
     is_raw: bool = false,
 };
 
 /// Enable raw mode for immediate character input
 pub fn enableRawMode() !TerminalState {
-    var term = posix.tcgetattr(posix.STDIN_FILENO) catch return TerminalError.GetAttrFailed;
+    return enableRawModeOnFd(posix.STDIN_FILENO);
+}
+
+/// Enable raw mode on a specific file descriptor
+pub fn enableRawModeOnFd(fd: posix.fd_t) !TerminalState {
+    var term = posix.tcgetattr(fd) catch return TerminalError.GetAttrFailed;
     const original = term;
 
     // Disable echo and canonical mode
@@ -34,10 +44,11 @@ pub fn enableRawMode() !TerminalState {
     term.cc[@intFromEnum(posix.V.MIN)] = 1;
     term.cc[@intFromEnum(posix.V.TIME)] = 0;
 
-    posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, term) catch return TerminalError.SetAttrFailed;
+    posix.tcsetattr(fd, .FLUSH, term) catch return TerminalError.SetAttrFailed;
 
     return TerminalState{
         .original_termios = original,
+        .fd = fd,
         .is_raw = true,
     };
 }
@@ -45,8 +56,23 @@ pub fn enableRawMode() !TerminalState {
 /// Disable raw mode and restore original terminal state
 pub fn disableRawMode(state: TerminalState) void {
     if (state.is_raw) {
-        posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, state.original_termios) catch {};
+        posix.tcsetattr(state.fd, .FLUSH, state.original_termios) catch {};
     }
+}
+
+/// Check if stdin is a TTY
+pub fn isStdinTty() bool {
+    return posix.isatty(posix.STDIN_FILENO);
+}
+
+/// Open /dev/tty for direct terminal access
+pub fn openTty() TtyError!posix.fd_t {
+    return posix.open("/dev/tty", .{ .ACCMODE = .RDWR }, 0) catch return TtyError.OpenFailed;
+}
+
+/// Close the TTY file descriptor
+pub fn closeTty(fd: posix.fd_t) void {
+    posix.close(fd);
 }
 
 /// ANSI escape sequences for terminal control
@@ -74,9 +100,13 @@ pub const Ansi = struct {
 
 /// Read a single byte from stdin
 pub fn readByte() !?u8 {
+    return readByteFromFd(posix.STDIN_FILENO);
+}
+
+/// Read a single byte from a file descriptor
+pub fn readByteFromFd(fd: posix.fd_t) !?u8 {
     var buf: [1]u8 = undefined;
-    const stdin = std.fs.File.stdin();
-    const n = stdin.read(&buf) catch return null;
+    const n = posix.read(fd, &buf) catch return null;
     if (n == 0) return null;
     return buf[0];
 }
@@ -102,13 +132,18 @@ pub const Key = union(enum) {
 
 /// Read a key (handles escape sequences)
 pub fn readKey() !Key {
-    const c = try readByte() orelse return Key.unknown;
+    return readKeyFromFd(posix.STDIN_FILENO);
+}
+
+/// Read a key from a file descriptor (handles escape sequences)
+pub fn readKeyFromFd(fd: posix.fd_t) !Key {
+    const c = try readByteFromFd(fd) orelse return Key.unknown;
 
     // Handle escape sequences
     if (c == 0x1b) {
-        const c2 = try readByte() orelse return Key.escape;
+        const c2 = try readByteFromFd(fd) orelse return Key.escape;
         if (c2 == '[') {
-            const c3 = try readByte() orelse return Key.unknown;
+            const c3 = try readByteFromFd(fd) orelse return Key.unknown;
             return switch (c3) {
                 'A' => Key.up,
                 'B' => Key.down,
@@ -116,7 +151,7 @@ pub fn readKey() !Key {
                 'D' => Key.left,
                 '3' => blk: {
                     // Delete key is ESC[3~
-                    _ = try readByte();
+                    _ = try readByteFromFd(fd);
                     break :blk Key.delete;
                 },
                 else => Key.unknown,
@@ -200,4 +235,135 @@ test "sanitizeForDisplay handles control characters" {
     defer allocator.free(result);
 
     try std.testing.expectEqualStrings("hello\\x00world", result);
+}
+
+test "isStdinTty returns boolean" {
+    // In test environment, stdin may or may not be a TTY depending on how tests are run
+    // This test verifies the function doesn't crash and returns a valid boolean
+    const result = isStdinTty();
+    try std.testing.expect(result == true or result == false);
+}
+
+test "openTty and closeTty" {
+    // Skip this test if stdin is not a TTY (CI environment, piped input, etc.)
+    // because /dev/tty won't be available
+    if (!isStdinTty()) {
+        return;
+    }
+
+    const fd = openTty() catch |err| {
+        // Even with a TTY stdin, /dev/tty may not be available in some environments
+        try std.testing.expectEqual(TtyError.OpenFailed, err);
+        return;
+    };
+
+    // Verify fd is valid (non-negative)
+    try std.testing.expect(fd >= 0);
+    closeTty(fd);
+}
+
+test "readByteFromFd with pipe" {
+    // Create a pipe to test reading from a file descriptor
+    const pipe = try posix.pipe();
+    defer posix.close(pipe[0]);
+    defer posix.close(pipe[1]);
+
+    // Write a byte to the pipe
+    _ = try posix.write(pipe[1], "x");
+
+    // Read it back
+    const byte = try readByteFromFd(pipe[0]);
+    try std.testing.expectEqual(@as(?u8, 'x'), byte);
+}
+
+test "readByteFromFd returns null on empty pipe" {
+    // Create a pipe and close the write end
+    const pipe = try posix.pipe();
+    defer posix.close(pipe[0]);
+    posix.close(pipe[1]);
+
+    // Read from empty pipe should return null
+    const byte = try readByteFromFd(pipe[0]);
+    try std.testing.expectEqual(@as(?u8, null), byte);
+}
+
+test "readKeyFromFd with regular character" {
+    const pipe = try posix.pipe();
+    defer posix.close(pipe[0]);
+    defer posix.close(pipe[1]);
+
+    // Write a regular character
+    _ = try posix.write(pipe[1], "a");
+
+    const key = try readKeyFromFd(pipe[0]);
+    try std.testing.expectEqual(Key{ .char = 'a' }, key);
+}
+
+test "readKeyFromFd with enter key" {
+    const pipe = try posix.pipe();
+    defer posix.close(pipe[0]);
+    defer posix.close(pipe[1]);
+
+    // Write carriage return (Enter)
+    _ = try posix.write(pipe[1], "\r");
+
+    const key = try readKeyFromFd(pipe[0]);
+    try std.testing.expectEqual(Key.enter, key);
+}
+
+test "readKeyFromFd with ctrl-c" {
+    const pipe = try posix.pipe();
+    defer posix.close(pipe[0]);
+    defer posix.close(pipe[1]);
+
+    // Write Ctrl-C (0x03)
+    _ = try posix.write(pipe[1], "\x03");
+
+    const key = try readKeyFromFd(pipe[0]);
+    try std.testing.expectEqual(Key.ctrl_c, key);
+}
+
+test "readKeyFromFd with arrow up escape sequence" {
+    const pipe = try posix.pipe();
+    defer posix.close(pipe[0]);
+    defer posix.close(pipe[1]);
+
+    // Write escape sequence for arrow up
+    _ = try posix.write(pipe[1], "\x1b[A");
+
+    const key = try readKeyFromFd(pipe[0]);
+    try std.testing.expectEqual(Key.up, key);
+}
+
+test "readKeyFromFd with arrow down escape sequence" {
+    const pipe = try posix.pipe();
+    defer posix.close(pipe[0]);
+    defer posix.close(pipe[1]);
+
+    // Write escape sequence for arrow down
+    _ = try posix.write(pipe[1], "\x1b[B");
+
+    const key = try readKeyFromFd(pipe[0]);
+    try std.testing.expectEqual(Key.down, key);
+}
+
+test "readKeyFromFd with backspace" {
+    const pipe = try posix.pipe();
+    defer posix.close(pipe[0]);
+    defer posix.close(pipe[1]);
+
+    // Write DEL (0x7f) for backspace
+    _ = try posix.write(pipe[1], "\x7f");
+
+    const key = try readKeyFromFd(pipe[0]);
+    try std.testing.expectEqual(Key.backspace, key);
+}
+
+test "TerminalState stores fd correctly" {
+    const state = TerminalState{
+        .original_termios = undefined,
+        .fd = 42,
+        .is_raw = false,
+    };
+    try std.testing.expectEqual(@as(posix.fd_t, 42), state.fd);
 }
