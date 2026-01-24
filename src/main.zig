@@ -6,6 +6,7 @@ const tui = @import("tui.zig");
 const terminal = @import("terminal.zig");
 const import_history = @import("import.zig");
 const self_update = @import("self_update.zig");
+const util = @import("util.zig");
 
 const VERSION = self_update.VERSION;
 
@@ -93,15 +94,15 @@ pub fn main() !void {
 
     if (scored_entries.items.len == 0) {
         if (parsed_history.entries.items.len == 0) {
-            // No history at all
+            // No history at all - show detailed help
             std.debug.print("zj: No history yet.\n", .{});
             std.debug.print("    Start using cd to build history, or run:\n", .{});
             std.debug.print("    zj import --zsh-history\n", .{});
+            std.process.exit(1);
         } else {
             // History exists but no matches for query
-            std.debug.print("zj: no matching directories found\n", .{});
+            util.exitWithError("no matching directories found", .{});
         }
-        std.process.exit(1);
     }
 
     // Try auto-select for exact or single matches
@@ -152,12 +153,10 @@ fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
                 } else if (std.mem.eql(u8, shell_arg, "fish")) {
                     result.init_shell = .fish;
                 } else {
-                    std.debug.print("zj: unknown shell '{s}'. Supported: bash, zsh, fish\n", .{shell_arg});
-                    std.process.exit(1);
+                    util.exitWithError("unknown shell '{s}'. Supported: bash, zsh, fish", .{shell_arg});
                 }
             } else {
-                std.debug.print("zj: 'init' requires a shell argument. Usage: zj init <bash|zsh|fish>\n", .{});
-                std.process.exit(1);
+                util.exitWithError("'init' requires a shell argument. Usage: zj init <bash|zsh|fish>", .{});
             }
         } else if (std.mem.eql(u8, arg, "import")) {
             // Parse import source
@@ -167,12 +166,10 @@ fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
                 } else if (std.mem.eql(u8, source_arg, "--bash-history")) {
                     result.import_source = .bash_history;
                 } else {
-                    std.debug.print("zj: unknown import source '{s}'. Supported: --zsh-history, --bash-history\n", .{source_arg});
-                    std.process.exit(1);
+                    util.exitWithError("unknown import source '{s}'. Supported: --zsh-history, --bash-history", .{source_arg});
                 }
             } else {
-                std.debug.print("zj: 'import' requires a source argument. Usage: zj import <--zsh-history|--bash-history>\n", .{});
-                std.process.exit(1);
+                util.exitWithError("'import' requires a source argument. Usage: zj import <--zsh-history|--bash-history>", .{});
             }
         } else if (std.mem.eql(u8, arg, "--query") or std.mem.eql(u8, arg, "-q")) {
             result.query_mode = true;
@@ -246,8 +243,7 @@ fn tryAutoSelect(entries: []const scoring.ScoredEntry) ?[]const u8 {
 /// Run interactive TUI selection
 fn runInteractiveSelection(allocator: std.mem.Allocator, entries: []scoring.ScoredEntry) void {
     const maybe_selected = tui.selectDirectory(allocator, entries) catch {
-        std.debug.print("zj: selection error\n", .{});
-        std.process.exit(1);
+        util.exitWithError("selection error", .{});
     };
 
     if (maybe_selected) |selected| {
@@ -255,8 +251,7 @@ fn runInteractiveSelection(allocator: std.mem.Allocator, entries: []scoring.Scor
             std.process.exit(1);
         };
     } else {
-        std.debug.print("zj: selection cancelled\n", .{});
-        std.process.exit(1);
+        util.exitWithError("selection cancelled", .{});
     }
 }
 
@@ -267,14 +262,12 @@ fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
     // Read all content from stdin
     const stdin = std.fs.File.stdin();
     const content = stdin.readToEndAlloc(allocator, MAX_PIPE_SIZE) catch {
-        std.debug.print("zj: failed to read from stdin\n", .{});
-        std.process.exit(1);
+        util.exitWithError("failed to read from stdin", .{});
     };
     defer allocator.free(content);
 
     if (content.len == 0) {
-        std.debug.print("zj: no input received from pipe\n", .{});
-        std.process.exit(1);
+        util.exitWithError("no input received from pipe", .{});
     }
 
     // Split content into lines
@@ -286,14 +279,12 @@ fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
         // Skip empty lines
         if (line.len == 0) continue;
         lines.append(allocator, line) catch {
-            std.debug.print("zj: memory allocation failed\n", .{});
-            std.process.exit(1);
+            util.exitWithError("memory allocation failed", .{});
         };
     }
 
     if (lines.items.len == 0) {
-        std.debug.print("zj: no input received from pipe\n", .{});
-        std.process.exit(1);
+        util.exitWithError("no input received from pipe", .{});
     }
 
     // Convert lines to ScoredEntry (with frecency_score = 0)
@@ -318,14 +309,12 @@ fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
             .visit_count = 0,
             .last_visit = 0,
         }) catch {
-            std.debug.print("zj: memory allocation failed\n", .{});
-            std.process.exit(1);
+            util.exitWithError("memory allocation failed", .{});
         };
     }
 
     if (scored_entries.items.len == 0) {
-        std.debug.print("zj: no matching entries found\n", .{});
-        std.process.exit(1);
+        util.exitWithError("no matching entries found", .{});
     }
 
     // Sort by score and try auto-select if query was provided
@@ -343,14 +332,12 @@ fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
 
     // Open /dev/tty for keyboard input (only needed for interactive selection)
     const tty_fd = terminal.openTty() catch {
-        std.debug.print("zj: failed to open /dev/tty (not running in a terminal?)\n", .{});
-        std.process.exit(1);
+        util.exitWithError("failed to open /dev/tty (not running in a terminal?)", .{});
     };
 
     // Run TUI with /dev/tty for input
     const maybe_selected = tui.selectDirectoryWithTty(allocator, scored_entries.items, null, tty_fd) catch {
-        std.debug.print("zj: selection error\n", .{});
-        std.process.exit(1);
+        util.exitWithError("selection error", .{});
     };
 
     if (maybe_selected) |selected| {
@@ -358,8 +345,7 @@ fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
             std.process.exit(1);
         };
     } else {
-        std.debug.print("zj: selection cancelled\n", .{});
-        std.process.exit(1);
+        util.exitWithError("selection cancelled", .{});
     }
 }
 
@@ -370,8 +356,7 @@ fn outputPath(path: []const u8) !void {
     // Validate path has no dangerous characters
     for (path) |c| {
         if (c == 0 or c == '\n' or c == '\r') {
-            std.debug.print("zj: invalid path\n", .{});
-            std.process.exit(1);
+            util.exitWithError("invalid path", .{});
         }
     }
 
@@ -463,8 +448,7 @@ fn runImport(allocator: std.mem.Allocator, source: import_history.ImportSource) 
         if (err == error.FileNotFound) {
             std.process.exit(1);
         }
-        std.debug.print("zj: import failed: {}\n", .{err});
-        std.process.exit(1);
+        util.exitWithError("import failed: {}", .{err});
     };
 
     std.debug.print("Done! Imported {d} directories", .{result.imported_count});

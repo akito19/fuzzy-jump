@@ -17,6 +17,12 @@ pub fn ensureParentDirExists(path: []const u8) !void {
     }
 }
 
+/// Print error message with "zj: " prefix and exit with code 1
+pub fn exitWithError(comptime fmt: []const u8, args: anytype) noreturn {
+    std.debug.print("zj: " ++ fmt ++ "\n", args);
+    std.process.exit(1);
+}
+
 test "directoryExists returns true for existing directory" {
     // Root directory should always exist
     try std.testing.expect(directoryExists("/"));
