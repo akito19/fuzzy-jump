@@ -22,7 +22,7 @@ const PathMap = std.StringHashMapUnmanaged(VisitData);
 const InternMap = std.StringHashMapUnmanaged([]const u8);
 
 /// String pool for deduplicating paths
-pub const StringPool = struct {
+const StringPool = struct {
     strings: InternMap,
     allocator: Allocator,
 
@@ -53,7 +53,7 @@ pub const StringPool = struct {
 };
 
 /// Parsed history result
-pub const ParsedHistory = struct {
+const ParsedHistory = struct {
     entries: EntryList,
     string_pool: StringPool,
     allocator: Allocator,

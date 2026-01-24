@@ -1,12 +1,12 @@
 const std = @import("std");
 const posix = std.posix;
 
-pub const TerminalError = error{
+const TerminalError = error{
     GetAttrFailed,
     SetAttrFailed,
 };
 
-pub const TtyError = error{
+const TtyError = error{
     OpenFailed,
 };
 
@@ -99,12 +99,12 @@ pub const Ansi = struct {
 };
 
 /// Read a single byte from stdin
-pub fn readByte() !?u8 {
+fn readByte() !?u8 {
     return readByteFromFd(posix.STDIN_FILENO);
 }
 
 /// Read a single byte from a file descriptor
-pub fn readByteFromFd(fd: posix.fd_t) !?u8 {
+fn readByteFromFd(fd: posix.fd_t) !?u8 {
     var buf: [1]u8 = undefined;
     const n = posix.read(fd, &buf) catch return null;
     if (n == 0) return null;

@@ -16,7 +16,7 @@ const InputBuffer = std.ArrayListUnmanaged(u8);
 const OutputBuffer = std.ArrayListUnmanaged(u8);
 
 /// TUI state
-pub const TUI = struct {
+const TUI = struct {
     allocator: Allocator,
     all_entries: []scoring.ScoredEntry,
     filtered_entries: EntryList,
@@ -415,7 +415,7 @@ pub fn selectDirectory(allocator: Allocator, entries: []scoring.ScoredEntry) !?[
 }
 
 /// Run interactive selection with initial query and return selected path
-pub fn selectDirectoryWithQuery(allocator: Allocator, entries: []scoring.ScoredEntry, initial_query: ?[]const u8) !?[]const u8 {
+fn selectDirectoryWithQuery(allocator: Allocator, entries: []scoring.ScoredEntry, initial_query: ?[]const u8) !?[]const u8 {
     return selectDirectoryWithTty(allocator, entries, initial_query, null);
 }
 

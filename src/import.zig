@@ -10,7 +10,7 @@ pub const ImportSource = enum {
     bash_history,
 };
 
-pub const ImportResult = struct {
+const ImportResult = struct {
     imported_count: usize,
     skipped_count: usize,
     already_exists_count: usize,
