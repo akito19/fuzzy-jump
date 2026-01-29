@@ -1,7 +1,7 @@
 .{
-    .name = .zj,
+    .name = .fj,
     .version = "0.1.0",
-    .fingerprint = 0x396e0bc5e78fbd44,
+    .fingerprint = 0xdf19569835abd321,
     .minimum_zig_version = "0.15.0",
     .paths = .{
         "build.zig",

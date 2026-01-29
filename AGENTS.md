@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-z-jump (zj) is a fuzzy directory jump tool written in Zig. It extracts directory navigation history from shell history files and provides fast directory switching using Frecency scoring (frequency + recency) combined with fuzzy matching.
+fuzzy-jump (fj) is a fuzzy directory jump tool written in Zig. It extracts directory navigation history from shell history files and provides fast directory switching using Frecency scoring (frequency + recency) combined with fuzzy matching.
 
 ### Key Features
 
@@ -36,9 +36,9 @@ src/
 ├── tui.zig         # Interactive UI, real-time filtering, key bindings
 ├── terminal.zig    # Terminal control, raw mode, ANSI escape sequences
 └── shell/
-    ├── zj.bash     # Bash shell integration script
-    ├── zj.zsh      # Zsh shell integration script
-    └── zj.fish     # Fish shell integration script
+    ├── fj.bash     # Bash shell integration script
+    ├── fj.zsh      # Zsh shell integration script
+    └── fj.fish     # Fish shell integration script
 ```
 
 ## Development Flow

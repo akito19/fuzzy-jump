@@ -4,14 +4,14 @@ const http = std.http;
 
 pub const VERSION = "0.3.0";
 
-const GITHUB_REPO = "akito19/z-jump";
+const GITHUB_REPO = "akito19/fuzzy-jump";
 
 pub const Platform = struct {
     os: []const u8,
     arch: []const u8,
 
     pub fn assetName(self: Platform, allocator: std.mem.Allocator, version: []const u8) ![]const u8 {
-        return std.fmt.allocPrint(allocator, "zj-{s}-{s}-{s}.tar.gz", .{ version, self.os, self.arch });
+        return std.fmt.allocPrint(allocator, "fj-{s}-{s}-{s}.tar.gz", .{ version, self.os, self.arch });
     }
 };
 
@@ -118,7 +118,7 @@ fn httpFetch(allocator: std.mem.Allocator, url: []const u8, extra_headers: []con
 /// Check for updates by querying GitHub API
 pub fn checkForUpdate(allocator: std.mem.Allocator) !UpdateCheckResult {
     const headers: []const http.Header = &.{
-        .{ .name = "User-Agent", .value = "zj-self-update/" ++ VERSION },
+        .{ .name = "User-Agent", .value = "fj-self-update/" ++ VERSION },
         .{ .name = "Accept", .value = "application/vnd.github.v3+json" },
     };
 
@@ -195,7 +195,7 @@ fn generateTempDirPath(allocator: std.mem.Allocator) ![]const u8 {
     var random_bytes: [8]u8 = undefined;
     std.crypto.random.bytes(&random_bytes);
 
-    return std.fmt.allocPrint(allocator, "{s}/zj-update-{x}", .{ base_tmp, random_bytes });
+    return std.fmt.allocPrint(allocator, "{s}/fj-update-{x}", .{ base_tmp, random_bytes });
 }
 
 /// Download SHA256SUMS file from GitHub release
@@ -208,7 +208,7 @@ fn downloadChecksums(allocator: std.mem.Allocator, version: []const u8) ![]const
     defer allocator.free(url);
 
     const headers: []const http.Header = &.{
-        .{ .name = "User-Agent", .value = "zj-self-update/" ++ VERSION },
+        .{ .name = "User-Agent", .value = "fj-self-update/" ++ VERSION },
     };
 
     const response = try httpFetch(allocator, url, headers);
@@ -259,7 +259,7 @@ fn findChecksumForFile(checksums_content: []const u8, filename: []const u8) ?[]c
 /// Download and extract the update
 fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []const u8, asset_name: []const u8) ![]const u8 {
     const headers: []const http.Header = &.{
-        .{ .name = "User-Agent", .value = "zj-self-update/" ++ VERSION },
+        .{ .name = "User-Agent", .value = "fj-self-update/" ++ VERSION },
     };
 
     const response = try httpFetch(allocator, url, headers);
@@ -322,9 +322,9 @@ fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []
 
     while (tar_iter.next() catch return SelfUpdateError.ExtractionFailed) |entry| {
         const file_name = entry.name;
-        // Look for the 'zj' binary
-        if (std.mem.endsWith(u8, file_name, "/zj") or std.mem.eql(u8, file_name, "zj")) {
-            const binary_path = try std.fs.path.join(allocator, &.{ tmp_dir_path, "zj" });
+        // Look for the 'fj' binary
+        if (std.mem.endsWith(u8, file_name, "/fj") or std.mem.eql(u8, file_name, "fj")) {
+            const binary_path = try std.fs.path.join(allocator, &.{ tmp_dir_path, "fj" });
             errdefer allocator.free(binary_path);
 
             const file = std.fs.createFileAbsolute(binary_path, .{}) catch {
@@ -355,7 +355,7 @@ fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []
 /// Create a backup of the current binary
 fn createBackup(allocator: std.mem.Allocator, self_exe_path: []const u8) ![]const u8 {
     const dir_path = std.fs.path.dirname(self_exe_path) orelse return SelfUpdateError.SelfExePathNotFound;
-    const backup_path = try std.fs.path.join(allocator, &.{ dir_path, "zj.backup" });
+    const backup_path = try std.fs.path.join(allocator, &.{ dir_path, "fj.backup" });
     errdefer allocator.free(backup_path);
 
     std.fs.copyFileAbsolute(self_exe_path, backup_path, .{}) catch {
@@ -387,7 +387,7 @@ fn atomicReplace(allocator: std.mem.Allocator, new_binary: []const u8) !void {
 
     // Create path for temporary new binary in same directory
     const dir_path = std.fs.path.dirname(self_exe_path) orelse return SelfUpdateError.SelfExePathNotFound;
-    const new_path = try std.fs.path.join(allocator, &.{ dir_path, "zj.new" });
+    const new_path = try std.fs.path.join(allocator, &.{ dir_path, "fj.new" });
     defer allocator.free(new_path);
 
     // Copy new binary to same directory
@@ -475,7 +475,7 @@ pub fn selfUpdate(allocator: std.mem.Allocator) !void {
     defer allocator.free(result.latest_version);
 
     if (result.is_up_to_date) {
-        std.debug.print("\u{2713} zj v{s} is the latest version\n", .{VERSION});
+        std.debug.print("\u{2713} fj v{s} is the latest version\n", .{VERSION});
         return;
     }
 
@@ -532,7 +532,7 @@ pub fn selfUpdate(allocator: std.mem.Allocator) !void {
         std.fs.deleteTreeAbsolute(path) catch {};
     }
 
-    std.debug.print("\u{2713} Successfully updated zj from v{s} to {s}\n", .{ VERSION, result.latest_version });
+    std.debug.print("\u{2713} Successfully updated fj from v{s} to {s}\n", .{ VERSION, result.latest_version });
 }
 
 // Tests
@@ -620,16 +620,16 @@ test "verifyChecksum" {
 
 test "findChecksumForFile" {
     const checksums =
-        \\abc123def456  zj-0.1.0-darwin-arm64.tar.gz
-        \\def789abc012  zj-0.1.0-linux-amd64.tar.gz
-        \\123456789abc  zj-0.1.0-darwin-amd64.tar.gz
+        \\abc123def456  fj-0.1.0-darwin-arm64.tar.gz
+        \\def789abc012  fj-0.1.0-linux-amd64.tar.gz
+        \\123456789abc  fj-0.1.0-darwin-amd64.tar.gz
     ;
 
-    const hash1 = findChecksumForFile(checksums, "zj-0.1.0-darwin-arm64.tar.gz");
+    const hash1 = findChecksumForFile(checksums, "fj-0.1.0-darwin-arm64.tar.gz");
     try std.testing.expect(hash1 != null);
     try std.testing.expectEqualStrings("abc123def456", hash1.?);
 
-    const hash2 = findChecksumForFile(checksums, "zj-0.1.0-linux-amd64.tar.gz");
+    const hash2 = findChecksumForFile(checksums, "fj-0.1.0-linux-amd64.tar.gz");
     try std.testing.expect(hash2 != null);
     try std.testing.expectEqualStrings("def789abc012", hash2.?);
 
@@ -649,7 +649,7 @@ test "generateTempDirPath" {
     // Paths should be different (random)
     try std.testing.expect(!std.mem.eql(u8, path1, path2));
 
-    // Paths should contain "zj-update-"
-    try std.testing.expect(std.mem.indexOf(u8, path1, "zj-update-") != null);
-    try std.testing.expect(std.mem.indexOf(u8, path2, "zj-update-") != null);
+    // Paths should contain "fj-update-"
+    try std.testing.expect(std.mem.indexOf(u8, path1, "fj-update-") != null);
+    try std.testing.expect(std.mem.indexOf(u8, path2, "fj-update-") != null);
 }

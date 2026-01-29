@@ -1,4 +1,4 @@
-# zj - Fuzzy Directory Jump
+# fj - Fuzzy Directory Jump
 
 A fuzzy directory jump tool that extends `cd`. It extracts directory navigation history from your shell history, scores entries using frecency (frequency + recency), and filters candidates with fuzzy matching. When multiple candidates exist, it presents a peco-like interactive TUI for selection.
 
@@ -16,13 +16,13 @@ A fuzzy directory jump tool that extends `cd`. It extracts directory navigation 
 ### Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/akito19/z-jump/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/akito19/fuzzy-jump/main/install.sh | sh
 ```
 
 You can also specify the install directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/akito19/z-jump/main/install.sh | ZJ_INSTALL_DIR=/usr/local/bin sh
+curl -fsSL https://raw.githubusercontent.com/akito19/fuzzy-jump/main/install.sh | FJ_INSTALL_DIR=/usr/local/bin sh
 ```
 
 ### Build from Source
@@ -30,10 +30,10 @@ curl -fsSL https://raw.githubusercontent.com/akito19/z-jump/main/install.sh | ZJ
 Requires Zig 0.15.0 or later.
 
 ```bash
-git clone https://github.com/akito19/z-jump.git
-cd z-jump
+git clone https://github.com/akito19/fuzzy-jump.git
+cd fuzzy-jump
 zig build -Doptimize=ReleaseFast
-cp zig-out/bin/zj ~/.local/bin/
+cp zig-out/bin/fj ~/.local/bin/
 ```
 
 ## Shell Integration
@@ -43,7 +43,7 @@ cp zig-out/bin/zj ~/.local/bin/
 Add to your `~/.zshrc`:
 
 ```zsh
-eval "$(zj init zsh)"
+eval "$(fj init zsh)"
 ```
 
 ### Bash
@@ -51,7 +51,7 @@ eval "$(zj init zsh)"
 Add to your `~/.bashrc`:
 
 ```bash
-eval "$(zj init bash)"
+eval "$(fj init bash)"
 ```
 
 ### Fish
@@ -59,21 +59,21 @@ eval "$(zj init bash)"
 Add to your `~/.config/fish/config.fish`:
 
 ```fish
-zj init fish | source
+fj init fish | source
 ```
 
 ### cd Override (Optional)
 
-You can optionally enable cd override, which falls back to `zj` when the normal `cd` command fails:
+You can optionally enable cd override, which falls back to `fj` when the normal `cd` command fails:
 
 ```bash
 # Bash/Zsh
-export ZJ_CD_OVERRIDE=1
-eval "$(zj init zsh)"  # or bash
+export FJ_CD_OVERRIDE=1
+eval "$(fj init zsh)"  # or bash
 
 # Fish
-set -gx ZJ_CD_OVERRIDE 1
-zj init fish | source
+set -gx FJ_CD_OVERRIDE 1
+fj init fish | source
 ```
 
 With this enabled:
@@ -83,16 +83,16 @@ With this enabled:
 | `cd` | Go to `$HOME` (normal) |
 | `cd -` | Go to previous directory (normal) |
 | `cd /existing/path` | Normal cd |
-| `cd proj` | If not found, search with `zj proj` |
+| `cd proj` | If not found, search with `fj proj` |
 
 ## Usage
 
 ```
-zj [OPTIONS] [QUERY]
-zj init <SHELL>
-zj import <SOURCE>
-zj self-update
-<command> | zj [QUERY]
+fj [OPTIONS] [QUERY]
+fj init <SHELL>
+fj import <SOURCE>
+fj self-update
+<command> | fj [QUERY]
 ```
 
 ### Arguments
@@ -105,7 +105,7 @@ zj self-update
 |---------|-------------|
 | `init <SHELL>` | Print shell integration script (`bash`, `zsh`, or `fish`) |
 | `import <SOURCE>` | Import history from shell history file (`--zsh-history`, `--bash-history`) |
-| `self-update` | Update zj to the latest version |
+| `self-update` | Update fj to the latest version |
 
 ### Options
 
@@ -124,39 +124,39 @@ zj self-update
 
 ### Pipe Input
 
-`zj` can read paths from stdin, allowing integration with tools like `ghq`, `fd`, `find`, etc.
+`fj` can read paths from stdin, allowing integration with tools like `ghq`, `fd`, `find`, etc.
 
 ```bash
 # Select from ghq-managed repositories
-ghq list -p | zj
+ghq list -p | fj
 
 # Select from fd results
-fd -t d | zj
+fd -t d | fj
 
 # Filter piped input with a query
-ghq list -p | zj proj
+ghq list -p | fj proj
 ```
 
 ### Examples
 
 ```bash
 # Launch interactive mode
-zj
+fj
 
 # Search for directories matching "proj"
-zj proj
+fj proj
 
 # Jump to a directory starting with "work"
-zj work
+fj work
 
 # Import directories from zsh history (bootstrap)
-zj import --zsh-history
+fj import --zsh-history
 
 # Update to the latest version
-zj self-update
+fj self-update
 
 # Select from ghq repositories and cd into it
-cd "$(ghq list -p | zj)"
+cd "$(ghq list -p | fj)"
 ```
 
 ## Interactive Keys
@@ -177,6 +177,14 @@ cd "$(ghq list -p | zj)"
 2. **Frecency Scoring**: Calculates score based on visit count and last access time
 3. **Fuzzy Matching**: Matches query against paths with basename priority
 4. **TUI Selection**: Presents interactive selection when multiple candidates exist
+
+## Migration from zj
+
+If you are upgrading from a previous version (`zj`), you need to manually migrate your history file:
+
+```bash
+mv ~/.local/share/zj ~/.local/share/fj
+```
 
 ## License
 

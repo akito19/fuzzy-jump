@@ -1,44 +1,44 @@
-# zj - Fuzzy directory jump for Zsh
+# fj - Fuzzy directory jump for Zsh
 # Source this file in your ~/.zshrc
 
 emulate -L zsh
 setopt no_xtrace no_verbose
 
 # Data directory setup
-_zj_data_dir="${ZJ_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/zj}"
-[[ -d "$_zj_data_dir" ]] || mkdir -p "$_zj_data_dir"
-export ZJ_DATA_FILE="$_zj_data_dir/history"
+_fj_data_dir="${FJ_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fj}"
+[[ -d "$_fj_data_dir" ]] || mkdir -p "$_fj_data_dir"
+export FJ_DATA_FILE="$_fj_data_dir/history"
 
 # Record directory visit
-_zj_add() {
+_fj_add() {
     # Skip if path is empty or home directory
     [[ -z "$1" || "$1" == "$HOME" ]] && return
 
     # Append timestamp:path to history file
-    print -r -- "$(date +%s):$1" >> "$ZJ_DATA_FILE" 2>/dev/null
+    print -r -- "$(date +%s):$1" >> "$FJ_DATA_FILE" 2>/dev/null
 }
 
 # Hook to record directory changes
-_zj_chpwd() {
-    _zj_add "$PWD"
+_fj_chpwd() {
+    _fj_add "$PWD"
 }
-chpwd_functions+=(_zj_chpwd)
+chpwd_functions+=(_fj_chpwd)
 
-# Wrapper function that changes directory based on zj output
-zj() {
+# Wrapper function that changes directory based on fj output
+fj() {
     local dir
-    dir=$(command zj "$@") || return 1
+    dir=$(command fj "$@") || return 1
 
     # Validate path doesn't contain newlines (security)
-    [[ "$dir" == *$'\n'* ]] && { echo "zj: Invalid path" >&2; return 1; }
+    [[ "$dir" == *$'\n'* ]] && { echo "fj: Invalid path" >&2; return 1; }
 
     # Change directory if path is non-empty
     [ -n "$dir" ] && cd -- "$dir"
 }
 
-# Optional: Override cd with zj fallback
-# Set ZJ_CD_OVERRIDE=1 in your shell config to enable
-if [[ -n "$ZJ_CD_OVERRIDE" ]]; then
+# Optional: Override cd with fj fallback
+# Set FJ_CD_OVERRIDE=1 in your shell config to enable
+if [[ -n "$FJ_CD_OVERRIDE" ]]; then
     cd() {
         # No arguments → go to $HOME (normal behavior)
         if [[ $# -eq 0 ]]; then
@@ -57,48 +57,48 @@ if [[ -n "$ZJ_CD_OVERRIDE" ]]; then
             return
         fi
 
-        # builtin cd failed → try zj fuzzy search
+        # builtin cd failed → try fj fuzzy search
         local dir
-        dir=$(command zj "$@") || {
-            # zj also failed → show original cd error
+        dir=$(command fj "$@") || {
+            # fj also failed → show original cd error
             builtin cd "$@"
             return
         }
 
         # Security: validate path doesn't contain newlines
-        [[ "$dir" == *$'\n'* ]] && { echo "zj: Invalid path" >&2; return 1; }
+        [[ "$dir" == *$'\n'* ]] && { echo "fj: Invalid path" >&2; return 1; }
 
         [ -n "$dir" ] && builtin cd -- "$dir"
     }
 fi
 
-# Optional: Add keybinding for Ctrl-G to invoke zj
-# bindkey -s '^g' 'zj^M'
+# Optional: Add keybinding for Ctrl-G to invoke fj
+# bindkey -s '^g' 'fj^M'
 
-# Tab completion for zj init subcommand
-_zj() {
+# Tab completion for fj init subcommand
+_fj() {
     if [[ "${words[2]}" == "init" ]]; then
         compadd bash zsh fish
         return
     fi
     # For other cases, use the widget below
 }
-compdef _zj zj
+compdef _fj fj
 
 # Interactive completion widget (TUI-based)
-_zj_complete_widget() {
+_fj_complete_widget() {
     # Get the current word being typed
     local current_word="${LBUFFER##* }"
 
-    # Only activate if we're completing after 'zj '
-    if [[ "$LBUFFER" != zj* ]]; then
+    # Only activate if we're completing after 'fj '
+    if [[ "$LBUFFER" != fj* ]]; then
         zle expand-or-complete
         return
     fi
 
     # Run TUI and capture result
     local dir
-    dir=$(command zj -q "$current_word" </dev/tty 2>/dev/tty)
+    dir=$(command fj -q "$current_word" </dev/tty 2>/dev/tty)
 
     if [[ -n "$dir" ]]; then
         # Replace current word with selected directory
@@ -110,15 +110,15 @@ _zj_complete_widget() {
         zle reset-prompt
     fi
 }
-zle -N _zj_complete_widget
+zle -N _fj_complete_widget
 
-# Bind Tab for zj command (using a wrapper)
-_zj_tab_handler() {
-    if [[ "$LBUFFER" == zj\ * || "$LBUFFER" == "zj" ]]; then
-        zle _zj_complete_widget
+# Bind Tab for fj command (using a wrapper)
+_fj_tab_handler() {
+    if [[ "$LBUFFER" == fj\ * || "$LBUFFER" == "fj" ]]; then
+        zle _fj_complete_widget
     else
         zle expand-or-complete
     fi
 }
-zle -N _zj_tab_handler
-bindkey '^I' _zj_tab_handler
+zle -N _fj_tab_handler
+bindkey '^I' _fj_tab_handler

@@ -1,9 +1,9 @@
 #!/bin/sh
 set -e
 
-REPO="akito19/z-jump"
-BINARY_NAME="zj"
-INSTALL_DIR="${ZJ_INSTALL_DIR:-$HOME/.local/bin}"
+REPO="akito19/fuzzy-jump"
+BINARY_NAME="fj"
+INSTALL_DIR="${FJ_INSTALL_DIR:-$HOME/.local/bin}"
 
 main() {
     detect_platform
@@ -55,7 +55,7 @@ get_latest_release() {
 }
 
 download_binary() {
-    VERSION="${ZJ_VERSION:-$(get_latest_release)}"
+    VERSION="${FJ_VERSION:-$(get_latest_release)}"
     if [ -z "$VERSION" ]; then
         echo "Error: Could not determine latest version" >&2
         exit 1
@@ -101,9 +101,9 @@ print_success() {
 
     echo "Shell integration (add to ~/.zshrc or ~/.bashrc):"
     echo ""
-    echo "  zj() {"
+    echo "  fj() {"
     echo "      local dir"
-    echo "      dir=\$(command zj \"\$@\") || return 1"
+    echo "      dir=\$(command fj \"\$@\") || return 1"
     echo "      [ -n \"\$dir\" ] && cd -- \"\$dir\""
     echo "  }"
     echo ""
