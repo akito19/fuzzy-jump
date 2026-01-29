@@ -67,8 +67,8 @@ const ParsedHistory = struct {
 
 /// Get the data file path from environment or default
 pub fn getDataFilePath(allocator: Allocator) ![]const u8 {
-    // Check ZJ_DATA_FILE environment variable first
-    if (std.posix.getenv("ZJ_DATA_FILE")) |path| {
+    // Check FJ_DATA_FILE environment variable first
+    if (std.posix.getenv("FJ_DATA_FILE")) |path| {
         return try allocator.dupe(u8, path);
     }
 
@@ -77,9 +77,9 @@ pub fn getDataFilePath(allocator: Allocator) ![]const u8 {
     const xdg_data_home = std.posix.getenv("XDG_DATA_HOME");
 
     if (xdg_data_home) |xdg| {
-        return try std.fmt.allocPrint(allocator, "{s}/zj/history", .{xdg});
+        return try std.fmt.allocPrint(allocator, "{s}/fj/history", .{xdg});
     } else {
-        return try std.fmt.allocPrint(allocator, "{s}/.local/share/zj/history", .{home});
+        return try std.fmt.allocPrint(allocator, "{s}/.local/share/fj/history", .{home});
     }
 }
 
@@ -247,7 +247,7 @@ fn writeDataFile(allocator: Allocator, entries: []const HistoryEntry, path: []co
     }
 }
 
-test "getDataFilePath with ZJ_DATA_FILE" {
+test "getDataFilePath with FJ_DATA_FILE" {
     // This test would need environment variable mocking
     // Skipping for now as it depends on runtime environment
 }

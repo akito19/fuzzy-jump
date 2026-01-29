@@ -17,9 +17,9 @@ pub fn ensureParentDirExists(path: []const u8) !void {
     }
 }
 
-/// Print error message with "zj: " prefix and exit with code 1
+/// Print error message with "fj: " prefix and exit with code 1
 pub fn exitWithError(comptime fmt: []const u8, args: anytype) noreturn {
-    std.debug.print("zj: " ++ fmt ++ "\n", args);
+    std.debug.print("fj: " ++ fmt ++ "\n", args);
     std.process.exit(1);
 }
 
@@ -29,7 +29,7 @@ test "directoryExists returns true for existing directory" {
 }
 
 test "directoryExists returns false for non-existing directory" {
-    try std.testing.expect(!directoryExists("/nonexistent_dir_12345_zj_test"));
+    try std.testing.expect(!directoryExists("/nonexistent_dir_12345_fj_test"));
 }
 
 test "directoryExists returns false for file path" {

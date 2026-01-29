@@ -95,9 +95,9 @@ pub fn main() !void {
     if (scored_entries.items.len == 0) {
         if (parsed_history.entries.items.len == 0) {
             // No history at all - show detailed help
-            std.debug.print("zj: No history yet.\n", .{});
+            std.debug.print("fj: No history yet.\n", .{});
             std.debug.print("    Start using cd to build history, or run:\n", .{});
-            std.debug.print("    zj import --zsh-history\n", .{});
+            std.debug.print("    fj import --zsh-history\n", .{});
             std.process.exit(1);
         } else {
             // History exists but no matches for query
@@ -156,7 +156,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
                     util.exitWithError("unknown shell '{s}'. Supported: bash, zsh, fish", .{shell_arg});
                 }
             } else {
-                util.exitWithError("'init' requires a shell argument. Usage: zj init <bash|zsh|fish>", .{});
+                util.exitWithError("'init' requires a shell argument. Usage: fj init <bash|zsh|fish>", .{});
             }
         } else if (std.mem.eql(u8, arg, "import")) {
             // Parse import source
@@ -169,7 +169,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
                     util.exitWithError("unknown import source '{s}'. Supported: --zsh-history, --bash-history", .{source_arg});
                 }
             } else {
-                util.exitWithError("'import' requires a source argument. Usage: zj import <--zsh-history|--bash-history>", .{});
+                util.exitWithError("'import' requires a source argument. Usage: fj import <--zsh-history|--bash-history>", .{});
             }
         } else if (std.mem.eql(u8, arg, "--query") or std.mem.eql(u8, arg, "-q")) {
             result.query_mode = true;
@@ -366,12 +366,12 @@ fn outputPath(path: []const u8) !void {
 
 fn printHelp() !void {
     const help =
-        \\zj - Fuzzy directory jump
+        \\fj - Fuzzy directory jump
         \\
         \\USAGE:
-        \\    zj [OPTIONS] [QUERY]
-        \\    zj init <SHELL>
-        \\    <command> | zj [QUERY]
+        \\    fj [OPTIONS] [QUERY]
+        \\    fj init <SHELL>
+        \\    <command> | fj [QUERY]
         \\
         \\ARGUMENTS:
         \\    [QUERY]    Fuzzy search pattern for directory name
@@ -380,7 +380,7 @@ fn printHelp() !void {
         \\    init <SHELL>         Print shell integration script (bash, zsh, fish)
         \\    import <SOURCE>      Import history from shell history file
         \\                         Sources: --zsh-history, --bash-history
-        \\    self-update          Update zj to the latest version
+        \\    self-update          Update fj to the latest version
         \\
         \\OPTIONS:
         \\    -h, --help           Show this help message
@@ -389,10 +389,10 @@ fn printHelp() !void {
         \\    --debug-history      Show parsed history entries
         \\
         \\PIPE INPUT:
-        \\    zj can read paths from stdin when piped:
-        \\        ghq list -p | zj          # Select from ghq-managed repositories
-        \\        fd -t d | zj              # Select from fd results
-        \\        ghq list -p | zj proj     # Filter with query
+        \\    fj can read paths from stdin when piped:
+        \\        ghq list -p | fj          # Select from ghq-managed repositories
+        \\        fd -t d | fj              # Select from fd results
+        \\        ghq list -p | fj proj     # Filter with query
         \\
         \\INTERACTIVE KEYS:
         \\    Up/Down, Ctrl-P/N    Navigate entries
@@ -404,31 +404,31 @@ fn printHelp() !void {
         \\
         \\SHELL INTEGRATION:
         \\    Zsh (~/.zshrc):
-        \\        eval "$(zj init zsh)"
+        \\        eval "$(fj init zsh)"
         \\
         \\    Bash (~/.bashrc):
-        \\        eval "$(zj init bash)"
+        \\        eval "$(fj init bash)"
         \\
         \\    Fish (~/.config/fish/config.fish):
-        \\        zj init fish | source
+        \\        fj init fish | source
         \\
-        \\    To enable cd override (fallback to zj when cd fails):
-        \\        export ZJ_CD_OVERRIDE=1  # or: set -gx ZJ_CD_OVERRIDE 1 (fish)
+        \\    To enable cd override (fallback to fj when cd fails):
+        \\        export FJ_CD_OVERRIDE=1  # or: set -gx FJ_CD_OVERRIDE 1 (fish)
         \\
     ;
     std.debug.print("{s}\n", .{help});
 }
 
 fn printVersion() !void {
-    std.debug.print("zj version {s}\n", .{VERSION});
+    std.debug.print("fj version {s}\n", .{VERSION});
 }
 
 fn printInit(shell: ShellType) !void {
     const stdout = std.fs.File.stdout();
     const script = switch (shell) {
-        .bash => @embedFile("shell/zj.bash"),
-        .zsh => @embedFile("shell/zj.zsh"),
-        .fish => @embedFile("shell/zj.fish"),
+        .bash => @embedFile("shell/fj.bash"),
+        .zsh => @embedFile("shell/fj.zsh"),
+        .fish => @embedFile("shell/fj.fish"),
     };
     _ = try stdout.write(script);
 }

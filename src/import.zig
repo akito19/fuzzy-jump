@@ -61,7 +61,7 @@ pub fn importFromShellHistory(
     // Read shell history
     const history_file = fs.openFileAbsolute(history_path, .{}) catch |err| {
         if (err == error.FileNotFound) {
-            std.debug.print("zj: history file not found: {s}\n", .{history_path});
+            std.debug.print("fj: history file not found: {s}\n", .{history_path});
             return error.FileNotFound;
         }
         return err;

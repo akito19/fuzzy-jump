@@ -50,17 +50,17 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp zig-out/bin/zj dist/
+          cp zig-out/bin/fj dist/
           cd dist
-          ARTIFACT_NAME="zj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}.tar.gz"
-          tar -czvf "$ARTIFACT_NAME" zj
+          ARTIFACT_NAME="fj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}.tar.gz"
+          tar -czvf "$ARTIFACT_NAME" fj
           mv "$ARTIFACT_NAME" ../
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}
-          path: zj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}.tar.gz
+          name: fj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}
+          path: fj-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}.tar.gz
 
   release:
     needs: build
