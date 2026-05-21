@@ -36,12 +36,13 @@ const ParsedArgs = struct {
     self_update: bool,
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
+    const io = init.io;
 
-    const args = try parseArgs(allocator);
+    const args = try parseArgs(allocator, init.minimal.args);
 
     if (args.show_help) {
         try printHelp();
@@ -59,12 +60,12 @@ pub fn main() !void {
     }
 
     if (args.import_source) |source| {
-        try runImport(allocator, source);
+        try runImport(allocator, io, source);
         return;
     }
 
     if (args.self_update) {
-        self_update.selfUpdate(allocator) catch {
+        self_update.selfUpdate(allocator, io) catch {
             std.process.exit(1);
         };
         return;
@@ -76,7 +77,7 @@ pub fn main() !void {
         return;
     }
 
-    var parsed_history = try history.parseHistory(allocator);
+    var parsed_history = try history.parseHistory(allocator, io);
     defer parsed_history.deinit();
 
     if (args.query_mode) {
@@ -118,8 +119,8 @@ pub fn main() !void {
 }
 
 /// Parse command line arguments
-fn parseArgs(allocator: std.mem.Allocator) !ParsedArgs {
-    var args = try std.process.argsWithAllocator(allocator);
+fn parseArgs(allocator: std.mem.Allocator, raw_args: std.process.Args) !ParsedArgs {
+    var args = try raw_args.iterateAllocator(allocator);
     defer args.deinit();
 
     _ = args.next(); // Skip program name
@@ -260,8 +261,7 @@ const MAX_PIPE_SIZE = 10 * 1024 * 1024; // 10 MB max for pipe input
 /// Run pipe mode: read lines from stdin, select with TUI using /dev/tty
 fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
     // Read all content from stdin
-    const stdin = std.fs.File.stdin();
-    const content = stdin.readToEndAlloc(allocator, MAX_PIPE_SIZE) catch {
+    const content = readAllStdin(allocator, MAX_PIPE_SIZE) catch {
         util.exitWithError("failed to read from stdin", .{});
     };
     defer allocator.free(content);
@@ -271,7 +271,7 @@ fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
     }
 
     // Split content into lines
-    var lines = std.ArrayListUnmanaged([]const u8){};
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
     defer lines.deinit(allocator);
 
     var line_iter = std.mem.splitScalar(u8, content, '\n');
@@ -288,7 +288,7 @@ fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
     }
 
     // Convert lines to ScoredEntry (with frecency_score = 0)
-    var scored_entries = std.ArrayListUnmanaged(scoring.ScoredEntry){};
+    var scored_entries: std.ArrayListUnmanaged(scoring.ScoredEntry) = .empty;
     defer scored_entries.deinit(allocator);
 
     for (lines.items) |line| {
@@ -349,10 +349,24 @@ fn runPipeMode(allocator: std.mem.Allocator, query: ?[]const u8) void {
     }
 }
 
+/// Read all bytes from stdin up to `max`. Caller owns returned slice.
+fn readAllStdin(allocator: std.mem.Allocator, max: usize) ![]u8 {
+    var list: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer list.deinit(allocator);
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = std.c.read(std.posix.STDIN_FILENO, &buf, buf.len);
+        if (n < 0) return error.ReadFailed;
+        if (n == 0) break;
+        const un: usize = @intCast(n);
+        if (list.items.len + un > max) return error.StreamTooLong;
+        try list.appendSlice(allocator, buf[0..un]);
+    }
+    return list.toOwnedSlice(allocator);
+}
+
 /// Output selected path to stdout
 fn outputPath(path: []const u8) !void {
-    const stdout = std.fs.File.stdout();
-
     // Validate path has no dangerous characters
     for (path) |c| {
         if (c == 0 or c == '\n' or c == '\r') {
@@ -360,8 +374,8 @@ fn outputPath(path: []const u8) !void {
         }
     }
 
-    _ = try stdout.write(path);
-    _ = try stdout.write("\n");
+    _ = try terminal.writeStdout(path);
+    _ = try terminal.writeStdout("\n");
 }
 
 fn printHelp() !void {
@@ -424,16 +438,15 @@ fn printVersion() !void {
 }
 
 fn printInit(shell: ShellType) !void {
-    const stdout = std.fs.File.stdout();
     const script = switch (shell) {
         .bash => @embedFile("shell/fj.bash"),
         .zsh => @embedFile("shell/fj.zsh"),
         .fish => @embedFile("shell/fj.fish"),
     };
-    _ = try stdout.write(script);
+    _ = try terminal.writeStdout(script);
 }
 
-fn runImport(allocator: std.mem.Allocator, source: import_history.ImportSource) !void {
+fn runImport(allocator: std.mem.Allocator, io: std.Io, source: import_history.ImportSource) !void {
     const data_file_path = try history.getDataFilePath(allocator);
     defer allocator.free(data_file_path);
 
@@ -444,7 +457,7 @@ fn runImport(allocator: std.mem.Allocator, source: import_history.ImportSource) 
 
     std.debug.print("Importing from {s}...\n", .{source_name});
 
-    const result = import_history.importFromShellHistory(allocator, source, data_file_path) catch |err| {
+    const result = import_history.importFromShellHistory(allocator, io, source, data_file_path) catch |err| {
         if (err == error.FileNotFound) {
             std.process.exit(1);
         }

@@ -1,5 +1,5 @@
 const std = @import("std");
-const fs = std.fs;
+const Io = std.Io;
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
 const util = @import("util.zig");
@@ -68,13 +68,13 @@ const ParsedHistory = struct {
 /// Get the data file path from environment or default
 pub fn getDataFilePath(allocator: Allocator) ![]const u8 {
     // Check FJ_DATA_FILE environment variable first
-    if (std.posix.getenv("FJ_DATA_FILE")) |path| {
+    if (util.getenv("FJ_DATA_FILE")) |path| {
         return try allocator.dupe(u8, path);
     }
 
     // Fall back to default path
-    const home = std.posix.getenv("HOME") orelse "/";
-    const xdg_data_home = std.posix.getenv("XDG_DATA_HOME");
+    const home = util.getenv("HOME") orelse "/";
+    const xdg_data_home = util.getenv("XDG_DATA_HOME");
 
     if (xdg_data_home) |xdg| {
         return try std.fmt.allocPrint(allocator, "{s}/fj/history", .{xdg});
@@ -84,7 +84,7 @@ pub fn getDataFilePath(allocator: Allocator) ![]const u8 {
 }
 
 /// Parse the dedicated history file and extract directory visits
-pub fn parseHistory(allocator: Allocator) !ParsedHistory {
+pub fn parseHistory(allocator: Allocator, io: Io) !ParsedHistory {
     var entries: EntryList = .empty;
     errdefer entries.deinit(allocator);
 
@@ -105,7 +105,7 @@ pub fn parseHistory(allocator: Allocator) !ParsedHistory {
     }
 
     // Parse the data file
-    parseDataFile(allocator, data_file_path, &path_data) catch |err| {
+    parseDataFile(allocator, io, data_file_path, &path_data) catch |err| {
         // If file doesn't exist, return empty result
         if (err == error.FileNotFound) {
             return .{
@@ -124,7 +124,7 @@ pub fn parseHistory(allocator: Allocator) !ParsedHistory {
         const data = entry.value_ptr.*;
 
         // Verify directory still exists
-        if (util.directoryExists(path)) {
+        if (util.directoryExists(io, path)) {
             const interned_path = try string_pool.intern(path);
             try entries.append(allocator, .{
                 .path = interned_path,
@@ -136,7 +136,7 @@ pub fn parseHistory(allocator: Allocator) !ParsedHistory {
 
     // Prune if needed and write back
     if (entries.items.len > MAX_ENTRIES) {
-        try pruneAndWriteBack(allocator, &entries, data_file_path);
+        try pruneAndWriteBack(allocator, io, &entries, data_file_path);
     }
 
     return .{
@@ -149,13 +149,16 @@ pub fn parseHistory(allocator: Allocator) !ParsedHistory {
 /// Parse the data file (format: timestamp:path per line)
 fn parseDataFile(
     allocator: Allocator,
+    io: Io,
     path: []const u8,
     path_data: *PathMap,
 ) !void {
-    const file = try fs.openFileAbsolute(path, .{});
-    defer file.close();
+    const file = try Io.Dir.openFileAbsolute(io, path, .{});
+    defer file.close(io);
 
-    const content = try file.readToEndAlloc(allocator, MAX_FILE_SIZE);
+    var read_buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &read_buf);
+    const content = try file_reader.interface.allocRemaining(allocator, .limited(MAX_FILE_SIZE));
     defer allocator.free(content);
 
     var lines = mem.splitScalar(u8, content, '\n');
@@ -193,6 +196,7 @@ fn parseDataFile(
 /// Prune entries to PRUNE_TARGET and write back to file
 fn pruneAndWriteBack(
     allocator: Allocator,
+    io: Io,
     entries: *EntryList,
     data_file_path: []const u8,
 ) !void {
@@ -230,21 +234,26 @@ fn pruneAndWriteBack(
     }
 
     // Write back to file
-    writeDataFile(allocator, entries.items, data_file_path) catch {};
+    writeDataFile(allocator, io, entries.items, data_file_path) catch {};
 }
 
 /// Write entries back to the data file (compacted format)
-fn writeDataFile(allocator: Allocator, entries: []const HistoryEntry, path: []const u8) !void {
-    try util.ensureParentDirExists(path);
+fn writeDataFile(allocator: Allocator, io: Io, entries: []const HistoryEntry, path: []const u8) !void {
+    try util.ensureParentDirExists(io, path);
 
-    const file = try fs.createFileAbsolute(path, .{});
-    defer file.close();
+    const file = try Io.Dir.createFileAbsolute(io, path, .{});
+    defer file.close(io);
+
+    var write_buf: [4096]u8 = undefined;
+    var file_writer = file.writer(io, &write_buf);
+    const w = &file_writer.interface;
 
     for (entries) |entry| {
         const line = try std.fmt.allocPrint(allocator, "{d}:{s}\n", .{ entry.timestamp, entry.path });
         defer allocator.free(line);
-        _ = try file.write(line);
+        try w.writeAll(line);
     }
+    try w.flush();
 }
 
 test "getDataFilePath with FJ_DATA_FILE" {

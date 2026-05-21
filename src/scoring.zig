@@ -60,9 +60,11 @@ pub fn compareScores(_: void, a: ScoredEntry, b: ScoredEntry) bool {
     return a.path.len < b.path.len;
 }
 
-/// Get current Unix timestamp
+/// Get current Unix timestamp via clock_gettime(CLOCK_REALTIME).
 pub fn getCurrentTimestamp() i64 {
-    return std.time.timestamp();
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.REALTIME, &ts);
+    return @intCast(ts.sec);
 }
 
 test "calculateFrecencyScore within hour" {

@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const http = std.http;
+const Io = std.Io;
+const util = @import("util.zig");
 
 pub const VERSION = "0.4.0";
 
@@ -94,8 +96,8 @@ pub const SemanticVersion = struct {
 };
 
 /// HTTP fetch helper to reduce code duplication
-fn httpFetch(allocator: std.mem.Allocator, url: []const u8, extra_headers: []const http.Header) !struct { status: http.Status, body: []const u8 } {
-    var client: http.Client = .{ .allocator = allocator };
+fn httpFetch(allocator: std.mem.Allocator, io: Io, url: []const u8, extra_headers: []const http.Header) !struct { status: http.Status, body: []const u8 } {
+    var client: http.Client = .{ .allocator = allocator, .io = io };
     defer client.deinit();
 
     var aw: std.Io.Writer.Allocating = .init(allocator);
@@ -116,13 +118,13 @@ fn httpFetch(allocator: std.mem.Allocator, url: []const u8, extra_headers: []con
 }
 
 /// Check for updates by querying GitHub API
-pub fn checkForUpdate(allocator: std.mem.Allocator) !UpdateCheckResult {
+pub fn checkForUpdate(allocator: std.mem.Allocator, io: Io) !UpdateCheckResult {
     const headers: []const http.Header = &.{
         .{ .name = "User-Agent", .value = "fj-self-update/" ++ VERSION },
         .{ .name = "Accept", .value = "application/vnd.github.v3+json" },
     };
 
-    const response = try httpFetch(allocator, "https://api.github.com/repos/" ++ GITHUB_REPO ++ "/releases/latest", headers);
+    const response = try httpFetch(allocator, io, "https://api.github.com/repos/" ++ GITHUB_REPO ++ "/releases/latest", headers);
     defer allocator.free(response.body);
 
     if (response.status == .forbidden) {
@@ -189,17 +191,17 @@ fn extractTagName(allocator: std.mem.Allocator, json_body: []const u8) ![]const 
 }
 
 /// Generate a random temporary directory path
-fn generateTempDirPath(allocator: std.mem.Allocator) ![]const u8 {
-    const base_tmp = std.posix.getenv("TMPDIR") orelse "/tmp";
+fn generateTempDirPath(allocator: std.mem.Allocator, io: Io) ![]const u8 {
+    const base_tmp = util.getenv("TMPDIR") orelse "/tmp";
 
     var random_bytes: [8]u8 = undefined;
-    std.crypto.random.bytes(&random_bytes);
+    io.random(&random_bytes);
 
     return std.fmt.allocPrint(allocator, "{s}/fj-update-{x}", .{ base_tmp, random_bytes });
 }
 
 /// Download SHA256SUMS file from GitHub release
-fn downloadChecksums(allocator: std.mem.Allocator, version: []const u8) ![]const u8 {
+fn downloadChecksums(allocator: std.mem.Allocator, io: Io, version: []const u8) ![]const u8 {
     const url = try std.fmt.allocPrint(
         allocator,
         "https://github.com/{s}/releases/download/{s}/SHA256SUMS",
@@ -211,7 +213,7 @@ fn downloadChecksums(allocator: std.mem.Allocator, version: []const u8) ![]const
         .{ .name = "User-Agent", .value = "fj-self-update/" ++ VERSION },
     };
 
-    const response = try httpFetch(allocator, url, headers);
+    const response = try httpFetch(allocator, io, url, headers);
     errdefer allocator.free(response.body);
 
     if (response.status == .not_found) {
@@ -257,12 +259,12 @@ fn findChecksumForFile(checksums_content: []const u8, filename: []const u8) ?[]c
 }
 
 /// Download and extract the update
-fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []const u8, asset_name: []const u8) ![]const u8 {
+fn downloadAndExtract(allocator: std.mem.Allocator, io: Io, url: []const u8, version: []const u8, asset_name: []const u8) ![]const u8 {
     const headers: []const http.Header = &.{
         .{ .name = "User-Agent", .value = "fj-self-update/" ++ VERSION },
     };
 
-    const response = try httpFetch(allocator, url, headers);
+    const response = try httpFetch(allocator, io, url, headers);
     defer allocator.free(response.body);
 
     if (response.status != .ok) {
@@ -270,7 +272,7 @@ fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []
     }
 
     // Download and verify checksum
-    const checksums = downloadChecksums(allocator, version) catch |err| {
+    const checksums = downloadChecksums(allocator, io, version) catch |err| {
         if (err == SelfUpdateError.ChecksumFileNotFound) {
             std.debug.print("Warning: SHA256SUMS file not found, skipping checksum verification\n", .{});
         } else {
@@ -291,11 +293,11 @@ fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []
     }
 
     // Create random temp directory
-    const tmp_dir_path = try generateTempDirPath(allocator);
+    const tmp_dir_path = try generateTempDirPath(allocator, io);
     errdefer allocator.free(tmp_dir_path);
 
-    std.fs.deleteTreeAbsolute(tmp_dir_path) catch {};
-    std.fs.makeDirAbsolute(tmp_dir_path) catch {
+    Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
+    Io.Dir.createDirAbsolute(io, tmp_dir_path, .default_dir) catch {
         return SelfUpdateError.PermissionDenied;
     };
 
@@ -313,8 +315,8 @@ fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []
 
     // Extract tar
     var tar_reader: std.Io.Reader = .fixed(tar_data_writer.written());
-    var file_name_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    var link_name_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var file_name_buffer: [Io.Dir.max_path_bytes]u8 = undefined;
+    var link_name_buffer: [Io.Dir.max_path_bytes]u8 = undefined;
     var tar_iter: std.tar.Iterator = .init(&tar_reader, .{
         .file_name_buffer = &file_name_buffer,
         .link_name_buffer = &link_name_buffer,
@@ -324,17 +326,17 @@ fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []
         const file_name = entry.name;
         // Look for the 'fj' binary
         if (std.mem.endsWith(u8, file_name, "/fj") or std.mem.eql(u8, file_name, "fj")) {
-            const binary_path = try std.fs.path.join(allocator, &.{ tmp_dir_path, "fj" });
+            const binary_path = try Io.Dir.path.join(allocator, &.{ tmp_dir_path, "fj" });
             errdefer allocator.free(binary_path);
 
-            const file = std.fs.createFileAbsolute(binary_path, .{}) catch {
+            const file = Io.Dir.createFileAbsolute(io, binary_path, .{}) catch {
                 return SelfUpdateError.PermissionDenied;
             };
-            defer file.close();
+            defer file.close(io);
 
             // Write the binary content using tar iterator's streamRemaining
             var file_write_buf: [8192]u8 = undefined;
-            var file_writer = file.writer(&file_write_buf);
+            var file_writer = file.writer(io, &file_write_buf);
             tar_iter.streamRemaining(entry, &file_writer.interface) catch {
                 return SelfUpdateError.ExtractionFailed;
             };
@@ -353,12 +355,12 @@ fn downloadAndExtract(allocator: std.mem.Allocator, url: []const u8, version: []
 }
 
 /// Create a backup of the current binary
-fn createBackup(allocator: std.mem.Allocator, self_exe_path: []const u8) ![]const u8 {
-    const dir_path = std.fs.path.dirname(self_exe_path) orelse return SelfUpdateError.SelfExePathNotFound;
-    const backup_path = try std.fs.path.join(allocator, &.{ dir_path, "fj.backup" });
+fn createBackup(allocator: std.mem.Allocator, io: Io, self_exe_path: []const u8) ![]const u8 {
+    const dir_path = Io.Dir.path.dirname(self_exe_path) orelse return SelfUpdateError.SelfExePathNotFound;
+    const backup_path = try Io.Dir.path.join(allocator, &.{ dir_path, "fj.backup" });
     errdefer allocator.free(backup_path);
 
-    std.fs.copyFileAbsolute(self_exe_path, backup_path, .{}) catch {
+    Io.Dir.copyFileAbsolute(self_exe_path, backup_path, io, .{}) catch {
         return SelfUpdateError.PermissionDenied;
     };
 
@@ -366,53 +368,53 @@ fn createBackup(allocator: std.mem.Allocator, self_exe_path: []const u8) ![]cons
 }
 
 /// Restore from backup
-fn restoreFromBackup(backup_path: []const u8, self_exe_path: []const u8) void {
-    std.fs.renameAbsolute(backup_path, self_exe_path) catch {
+fn restoreFromBackup(io: Io, backup_path: []const u8, self_exe_path: []const u8) void {
+    Io.Dir.renameAbsolute(backup_path, self_exe_path, io) catch {
         std.debug.print("Warning: Failed to restore from backup at {s}\n", .{backup_path});
     };
 }
 
 /// Atomically replace the current binary with the new one
-fn atomicReplace(allocator: std.mem.Allocator, new_binary: []const u8) !void {
+fn atomicReplace(allocator: std.mem.Allocator, io: Io, new_binary: []const u8) !void {
     // Get current executable path
-    var self_exe_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const self_exe_path = std.fs.selfExePath(&self_exe_buf) catch {
+    const self_exe_path = std.process.executablePathAlloc(io, allocator) catch {
         return SelfUpdateError.SelfExePathNotFound;
     };
+    defer allocator.free(self_exe_path);
 
     // Create backup of current binary
-    const backup_path = try createBackup(allocator, self_exe_path);
+    const backup_path = try createBackup(allocator, io, self_exe_path);
     defer allocator.free(backup_path);
-    errdefer restoreFromBackup(backup_path, self_exe_path);
+    errdefer restoreFromBackup(io, backup_path, self_exe_path);
 
     // Create path for temporary new binary in same directory
-    const dir_path = std.fs.path.dirname(self_exe_path) orelse return SelfUpdateError.SelfExePathNotFound;
-    const new_path = try std.fs.path.join(allocator, &.{ dir_path, "fj.new" });
+    const dir_path = Io.Dir.path.dirname(self_exe_path) orelse return SelfUpdateError.SelfExePathNotFound;
+    const new_path = try Io.Dir.path.join(allocator, &.{ dir_path, "fj.new" });
     defer allocator.free(new_path);
 
     // Copy new binary to same directory
-    std.fs.copyFileAbsolute(new_binary, new_path, .{}) catch {
+    Io.Dir.copyFileAbsolute(new_binary, new_path, io, .{}) catch {
         return SelfUpdateError.PermissionDenied;
     };
-    errdefer std.fs.deleteFileAbsolute(new_path) catch {};
+    errdefer Io.Dir.deleteFileAbsolute(io, new_path) catch {};
 
     // Set executable permission
-    const new_file = std.fs.openFileAbsolute(new_path, .{ .mode = .read_write }) catch {
+    const new_file = Io.Dir.openFileAbsolute(io, new_path, .{ .mode = .read_write }) catch {
         return SelfUpdateError.PermissionDenied;
     };
-    new_file.chmod(0o755) catch {
-        new_file.close();
+    new_file.setPermissions(io, .fromMode(0o755)) catch {
+        new_file.close(io);
         return SelfUpdateError.PermissionDenied;
     };
-    new_file.close();
+    new_file.close(io);
 
     // Atomic rename
-    std.fs.renameAbsolute(new_path, self_exe_path) catch {
+    Io.Dir.renameAbsolute(new_path, self_exe_path, io) catch {
         return SelfUpdateError.PermissionDenied;
     };
 
     // Success - remove backup
-    std.fs.deleteFileAbsolute(backup_path) catch {};
+    Io.Dir.deleteFileAbsolute(io, backup_path) catch {};
 }
 
 /// Print update error messages
@@ -455,11 +457,11 @@ fn printUpdateError(err: SelfUpdateError) void {
 }
 
 /// Main self-update function
-pub fn selfUpdate(allocator: std.mem.Allocator) !void {
+pub fn selfUpdate(allocator: std.mem.Allocator, io: Io) !void {
     // Check for updates
     std.debug.print("Checking for updates...\n", .{});
 
-    const result = checkForUpdate(allocator) catch |err| {
+    const result = checkForUpdate(allocator, io) catch |err| {
         switch (err) {
             error.OutOfMemory => {
                 std.debug.print("Out of memory.\n", .{});
@@ -495,7 +497,7 @@ pub fn selfUpdate(allocator: std.mem.Allocator) !void {
 
     std.debug.print("Downloading...\n", .{});
 
-    const new_binary = downloadAndExtract(allocator, download_url, result.latest_version, asset_name) catch |err| {
+    const new_binary = downloadAndExtract(allocator, io, download_url, result.latest_version, asset_name) catch |err| {
         switch (err) {
             error.OutOfMemory => {
                 std.debug.print("Out of memory.\n", .{});
@@ -510,11 +512,11 @@ pub fn selfUpdate(allocator: std.mem.Allocator) !void {
     defer allocator.free(new_binary);
 
     // Get temp directory path from binary path for cleanup
-    const tmp_dir_path = std.fs.path.dirname(new_binary);
+    const tmp_dir_path = Io.Dir.path.dirname(new_binary);
 
     std.debug.print("Installing...\n", .{});
 
-    atomicReplace(allocator, new_binary) catch |err| {
+    atomicReplace(allocator, io, new_binary) catch |err| {
         switch (err) {
             error.OutOfMemory => {
                 std.debug.print("Out of memory.\n", .{});
@@ -529,7 +531,7 @@ pub fn selfUpdate(allocator: std.mem.Allocator) !void {
 
     // Clean up temp directory
     if (tmp_dir_path) |path| {
-        std.fs.deleteTreeAbsolute(path) catch {};
+        Io.Dir.cwd().deleteTree(io, path) catch {};
     }
 
     std.debug.print("\u{2713} Successfully updated fj from v{s} to {s}\n", .{ VERSION, result.latest_version });
@@ -640,10 +642,10 @@ test "findChecksumForFile" {
 test "generateTempDirPath" {
     const allocator = std.testing.allocator;
 
-    const path1 = try generateTempDirPath(allocator);
+    const path1 = try generateTempDirPath(allocator, std.testing.io);
     defer allocator.free(path1);
 
-    const path2 = try generateTempDirPath(allocator);
+    const path2 = try generateTempDirPath(allocator, std.testing.io);
     defer allocator.free(path2);
 
     // Paths should be different (random)
