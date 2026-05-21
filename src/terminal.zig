@@ -1,5 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
+const libc = std.c;
 
 const TerminalError = error{
     GetAttrFailed,
@@ -9,6 +10,35 @@ const TerminalError = error{
 const TtyError = error{
     OpenFailed,
 };
+
+/// Write all bytes to fd via libc write(2). Returns number written on success.
+fn cWrite(fd: posix.fd_t, bytes: []const u8) !usize {
+    const n = libc.write(fd, bytes.ptr, bytes.len);
+    if (n < 0) return error.WriteFailed;
+    return @intCast(n);
+}
+
+/// Write bytes to stderr. Returns the number of bytes written.
+pub fn writeStderr(bytes: []const u8) !usize {
+    return cWrite(posix.STDERR_FILENO, bytes);
+}
+
+/// Write bytes to stdout. Returns the number of bytes written.
+pub fn writeStdout(bytes: []const u8) !usize {
+    return cWrite(posix.STDOUT_FILENO, bytes);
+}
+
+/// Close fd via libc close(2). Errors are silently ignored to match prior behavior.
+fn cClose(fd: posix.fd_t) void {
+    _ = libc.close(fd);
+}
+
+/// Create a pipe via libc pipe(2).
+fn cPipe() ![2]posix.fd_t {
+    var fds: [2]posix.fd_t = undefined;
+    if (libc.pipe(&fds) != 0) return error.PipeFailed;
+    return fds;
+}
 
 /// Original terminal state for restoration
 pub const TerminalState = struct {
@@ -62,17 +92,19 @@ pub fn disableRawMode(state: TerminalState) void {
 
 /// Check if stdin is a TTY
 pub fn isStdinTty() bool {
-    return posix.isatty(posix.STDIN_FILENO);
+    return libc.isatty(posix.STDIN_FILENO) != 0;
 }
 
 /// Open /dev/tty for direct terminal access
 pub fn openTty() TtyError!posix.fd_t {
-    return posix.open("/dev/tty", .{ .ACCMODE = .RDWR }, 0) catch return TtyError.OpenFailed;
+    const fd = libc.open("/dev/tty", .{ .ACCMODE = .RDWR });
+    if (fd < 0) return TtyError.OpenFailed;
+    return @intCast(fd);
 }
 
 /// Close the TTY file descriptor
 pub fn closeTty(fd: posix.fd_t) void {
-    posix.close(fd);
+    cClose(fd);
 }
 
 /// ANSI escape sequences for terminal control
@@ -264,12 +296,12 @@ test "openTty and closeTty" {
 
 test "readByteFromFd with pipe" {
     // Create a pipe to test reading from a file descriptor
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    defer posix.close(pipe[1]);
+    const pipe = try cPipe();
+    defer cClose(pipe[0]);
+    defer cClose(pipe[1]);
 
     // Write a byte to the pipe
-    _ = try posix.write(pipe[1], "x");
+    _ = try cWrite(pipe[1], "x");
 
     // Read it back
     const byte = try readByteFromFd(pipe[0]);
@@ -278,9 +310,9 @@ test "readByteFromFd with pipe" {
 
 test "readByteFromFd returns null on empty pipe" {
     // Create a pipe and close the write end
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    posix.close(pipe[1]);
+    const pipe = try cPipe();
+    defer cClose(pipe[0]);
+    cClose(pipe[1]);
 
     // Read from empty pipe should return null
     const byte = try readByteFromFd(pipe[0]);
@@ -288,72 +320,72 @@ test "readByteFromFd returns null on empty pipe" {
 }
 
 test "readKeyFromFd with regular character" {
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    defer posix.close(pipe[1]);
+    const pipe = try cPipe();
+    defer cClose(pipe[0]);
+    defer cClose(pipe[1]);
 
     // Write a regular character
-    _ = try posix.write(pipe[1], "a");
+    _ = try cWrite(pipe[1], "a");
 
     const key = try readKeyFromFd(pipe[0]);
     try std.testing.expectEqual(Key{ .char = 'a' }, key);
 }
 
 test "readKeyFromFd with enter key" {
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    defer posix.close(pipe[1]);
+    const pipe = try cPipe();
+    defer cClose(pipe[0]);
+    defer cClose(pipe[1]);
 
     // Write carriage return (Enter)
-    _ = try posix.write(pipe[1], "\r");
+    _ = try cWrite(pipe[1], "\r");
 
     const key = try readKeyFromFd(pipe[0]);
     try std.testing.expectEqual(Key.enter, key);
 }
 
 test "readKeyFromFd with ctrl-c" {
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    defer posix.close(pipe[1]);
+    const pipe = try cPipe();
+    defer cClose(pipe[0]);
+    defer cClose(pipe[1]);
 
     // Write Ctrl-C (0x03)
-    _ = try posix.write(pipe[1], "\x03");
+    _ = try cWrite(pipe[1], "\x03");
 
     const key = try readKeyFromFd(pipe[0]);
     try std.testing.expectEqual(Key.ctrl_c, key);
 }
 
 test "readKeyFromFd with arrow up escape sequence" {
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    defer posix.close(pipe[1]);
+    const pipe = try cPipe();
+    defer cClose(pipe[0]);
+    defer cClose(pipe[1]);
 
     // Write escape sequence for arrow up
-    _ = try posix.write(pipe[1], "\x1b[A");
+    _ = try cWrite(pipe[1], "\x1b[A");
 
     const key = try readKeyFromFd(pipe[0]);
     try std.testing.expectEqual(Key.up, key);
 }
 
 test "readKeyFromFd with arrow down escape sequence" {
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    defer posix.close(pipe[1]);
+    const pipe = try cPipe();
+    defer cClose(pipe[0]);
+    defer cClose(pipe[1]);
 
     // Write escape sequence for arrow down
-    _ = try posix.write(pipe[1], "\x1b[B");
+    _ = try cWrite(pipe[1], "\x1b[B");
 
     const key = try readKeyFromFd(pipe[0]);
     try std.testing.expectEqual(Key.down, key);
 }
 
 test "readKeyFromFd with backspace" {
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    defer posix.close(pipe[1]);
+    const pipe = try cPipe();
+    defer cClose(pipe[0]);
+    defer cClose(pipe[1]);
 
     // Write DEL (0x7f) for backspace
-    _ = try posix.write(pipe[1], "\x7f");
+    _ = try cWrite(pipe[1], "\x7f");
 
     const key = try readKeyFromFd(pipe[0]);
     try std.testing.expectEqual(Key.backspace, key);

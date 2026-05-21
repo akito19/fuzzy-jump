@@ -1,5 +1,5 @@
 const std = @import("std");
-const fs = std.fs;
+const Io = std.Io;
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
 const util = @import("util.zig");
@@ -20,13 +20,14 @@ const ImportResult = struct {
 /// Import directory history from shell history file
 pub fn importFromShellHistory(
     allocator: Allocator,
+    io: Io,
     source: ImportSource,
     data_file_path: []const u8,
 ) !ImportResult {
     const history_path = try getShellHistoryPath(allocator, source);
     defer allocator.free(history_path);
 
-    const home = std.posix.getenv("HOME") orelse return error.HomeNotSet;
+    const home = util.getenv("HOME") orelse return error.HomeNotSet;
 
     // Read existing entries to avoid duplicates
     var existing_paths = std.StringHashMap(void).init(allocator);
@@ -38,9 +39,11 @@ pub fn importFromShellHistory(
         existing_paths.deinit();
     }
 
-    if (fs.openFileAbsolute(data_file_path, .{})) |file| {
-        defer file.close();
-        const content = try file.readToEndAlloc(allocator, MAX_FILE_SIZE);
+    if (Io.Dir.openFileAbsolute(io, data_file_path, .{})) |file| {
+        defer file.close(io);
+        var read_buf: [4096]u8 = undefined;
+        var file_reader = file.reader(io, &read_buf);
+        const content = try file_reader.interface.allocRemaining(allocator, .limited(MAX_FILE_SIZE));
         defer allocator.free(content);
 
         var lines = mem.splitScalar(u8, content, '\n');
@@ -59,16 +62,18 @@ pub fn importFromShellHistory(
     }
 
     // Read shell history
-    const history_file = fs.openFileAbsolute(history_path, .{}) catch |err| {
+    const history_file = Io.Dir.openFileAbsolute(io, history_path, .{}) catch |err| {
         if (err == error.FileNotFound) {
             std.debug.print("fj: history file not found: {s}\n", .{history_path});
             return error.FileNotFound;
         }
         return err;
     };
-    defer history_file.close();
+    defer history_file.close(io);
 
-    const history_content = try history_file.readToEndAlloc(allocator, MAX_FILE_SIZE);
+    var hist_read_buf: [4096]u8 = undefined;
+    var hist_file_reader = history_file.reader(io, &hist_read_buf);
+    const history_content = try hist_file_reader.interface.allocRemaining(allocator, .limited(MAX_FILE_SIZE));
     defer allocator.free(history_content);
 
     // Extract cd commands and collect unique paths
@@ -130,7 +135,7 @@ pub fn importFromShellHistory(
         }
 
         // Verify directory exists
-        if (!util.directoryExists(normalized)) {
+        if (!util.directoryExists(io, normalized)) {
             result.skipped_count += 1;
             continue;
         }
@@ -142,7 +147,7 @@ pub fn importFromShellHistory(
 
     // Write to data file
     if (paths_to_import.count() > 0) {
-        try appendToDataFile(allocator, paths_to_import, data_file_path);
+        try appendToDataFile(allocator, io, paths_to_import, data_file_path);
         result.imported_count = paths_to_import.count();
     }
 
@@ -152,11 +157,11 @@ pub fn importFromShellHistory(
 /// Get the path to shell history file
 fn getShellHistoryPath(allocator: Allocator, source: ImportSource) ![]const u8 {
     // Check HISTFILE environment variable first (common to both shells)
-    if (std.posix.getenv("HISTFILE")) |histfile| {
+    if (util.getenv("HISTFILE")) |histfile| {
         return try allocator.dupe(u8, histfile);
     }
 
-    const home = std.posix.getenv("HOME") orelse return error.HomeNotSet;
+    const home = util.getenv("HOME") orelse return error.HomeNotSet;
     const filename = switch (source) {
         .zsh_history => ".zsh_history",
         .bash_history => ".bash_history",
@@ -334,25 +339,30 @@ fn normalizePath(allocator: Allocator, path: []const u8) ![]const u8 {
 
 /// Append paths to data file
 fn appendToDataFile(
-    allocator: Allocator,
+    _: Allocator,
+    io: Io,
     paths: std.StringHashMap(void),
     data_file_path: []const u8,
 ) !void {
-    try util.ensureParentDirExists(data_file_path);
+    try util.ensureParentDirExists(io, data_file_path);
 
-    const file = try fs.createFileAbsolute(data_file_path, .{ .truncate = false });
-    defer file.close();
+    const file = try Io.Dir.createFileAbsolute(io, data_file_path, .{ .truncate = false });
+    defer file.close(io);
 
-    // Seek to end
-    try file.seekFromEnd(0);
+    // Seek to end (preserve existing content)
+    const existing_len = try file.length(io);
 
-    const now = std.time.timestamp();
+    var write_buf: [4096]u8 = undefined;
+    var file_writer = file.writer(io, &write_buf);
+    try file_writer.seekTo(existing_len);
+    const w = &file_writer.interface;
+
+    const now = @import("scoring.zig").getCurrentTimestamp();
     var it = paths.keyIterator();
     while (it.next()) |key| {
-        const line = try std.fmt.allocPrint(allocator, "{d}:{s}\n", .{ now, key.* });
-        defer allocator.free(line);
-        _ = try file.write(line);
+        try w.print("{d}:{s}\n", .{ now, key.* });
     }
+    try w.flush();
 }
 
 // Tests

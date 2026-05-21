@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/akito19/fuzzy-jump/main/install.sh 
 
 ### Build from Source
 
-Requires Zig 0.15.0 or later.
+Requires Zig 0.16.0 or later.
 
 ```bash
 git clone https://github.com/akito19/fuzzy-jump.git

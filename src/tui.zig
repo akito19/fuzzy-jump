@@ -314,13 +314,11 @@ const TUI = struct {
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_show);
 
         // Write everything at once to stderr
-        const stderr = std.fs.File.stderr();
-        _ = try stderr.write(self.output_buf.items);
+        _ = try terminal.writeStderr(self.output_buf.items);
     }
 
     /// Render inline TUI (below prompt)
     fn renderInline(self: *TUI) !void {
-        const stderr = std.fs.File.stderr();
         self.output_buf.clearRetainingCapacity();
 
         // On subsequent renders, move cursor up by the number of previously rendered lines
@@ -363,29 +361,27 @@ const TUI = struct {
         try self.output_buf.appendSlice(self.allocator, terminal.Ansi.cursor_show);
 
         // Write everything at once to stderr
-        _ = try stderr.write(self.output_buf.items);
+        _ = try terminal.writeStderr(self.output_buf.items);
     }
 
     /// Clean up terminal state
     fn cleanup(self: *TUI) void {
-        const stderr = std.fs.File.stderr();
-
         if (self.inline_mode) {
             // Move cursor up by the number of rendered lines and clear to end of screen
             if (self.rendered_lines > 0) {
                 var cursor_up_buf: [16]u8 = undefined;
                 const cursor_up_seq = terminal.Ansi.cursorUp(&cursor_up_buf, self.rendered_lines);
-                _ = stderr.write(cursor_up_seq) catch {};
-                _ = stderr.write(terminal.Ansi.cursor_column_1) catch {};
+                _ = terminal.writeStderr(cursor_up_seq) catch {};
+                _ = terminal.writeStderr(terminal.Ansi.cursor_column_1) catch {};
             }
-            _ = stderr.write(terminal.Ansi.clear_to_end) catch {};
-            _ = stderr.write(terminal.Ansi.cursor_show) catch {};
-            _ = stderr.write(terminal.Ansi.reset_style) catch {};
+            _ = terminal.writeStderr(terminal.Ansi.clear_to_end) catch {};
+            _ = terminal.writeStderr(terminal.Ansi.cursor_show) catch {};
+            _ = terminal.writeStderr(terminal.Ansi.reset_style) catch {};
         } else {
-            _ = stderr.write(terminal.Ansi.clear_screen) catch {};
-            _ = stderr.write(terminal.Ansi.cursor_home) catch {};
-            _ = stderr.write(terminal.Ansi.cursor_show) catch {};
-            _ = stderr.write(terminal.Ansi.reset_style) catch {};
+            _ = terminal.writeStderr(terminal.Ansi.clear_screen) catch {};
+            _ = terminal.writeStderr(terminal.Ansi.cursor_home) catch {};
+            _ = terminal.writeStderr(terminal.Ansi.cursor_show) catch {};
+            _ = terminal.writeStderr(terminal.Ansi.reset_style) catch {};
         }
     }
 };
@@ -433,8 +429,7 @@ pub fn selectDirectoryInline(allocator: Allocator, entries: []scoring.ScoredEntr
     }
 
     // Print newline to move below the prompt
-    const stderr = std.fs.File.stderr();
-    _ = try stderr.write("\n");
+    _ = try terminal.writeStderr("\n");
 
     return ui.run();
 }
